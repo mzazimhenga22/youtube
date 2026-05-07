@@ -1,0 +1,126 @@
+{
+  "project_info": {
+    "project_number": "792382812631",
+    "project_id": "movieflixreactnative",
+    "storage_bucket": "movieflixreactnative.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:792382812631:android:d391ce7f647997c0b5db92",
+        "android_client_info": {
+          "package_name": "com.droidnet.spotify"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "792382812631-g3juut38j0i13avap5qc8bdj8dt9rrvh.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC12T5Mj0QI2cV96NIUKuBchTEgGegWLwc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "792382812631-g3juut38j0i13avap5qc8bdj8dt9rrvh.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:792382812631:android:7d4e4513179c1bc9b5db92",
+        "android_client_info": {
+          "package_name": "com.movieflix.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "792382812631-g3juut38j0i13avap5qc8bdj8dt9rrvh.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC12T5Mj0QI2cV96NIUKuBchTEgGegWLwc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "792382812631-g3juut38j0i13avap5qc8bdj8dt9rrvh.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:792382812631:android:3e606b5a63b517f3b5db92",
+        "android_client_info": {
+          "package_name": "com.movieflix.tv"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "792382812631-g3juut38j0i13avap5qc8bdj8dt9rrvh.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC12T5Mj0QI2cV96NIUKuBchTEgGegWLwc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "792382812631-g3juut38j0i13avap5qc8bdj8dt9rrvh.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:792382812631:android:0d57b44cf0287cffb5db92",
+        "android_client_info": {
+          "package_name": "com.youtubekids.youtube"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "792382812631-g3juut38j0i13avap5qc8bdj8dt9rrvh.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC12T5Mj0QI2cV96NIUKuBchTEgGegWLwc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "792382812631-g3juut38j0i13avap5qc8bdj8dt9rrvh.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
