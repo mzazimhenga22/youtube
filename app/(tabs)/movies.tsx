@@ -14,7 +14,7 @@ import Animated, {
   FadeInUp,
   FadeIn
 } from 'react-native-reanimated';
-import { router } from 'expo-router';
+import { playVideo } from '@/lib/navigation';
 import { Easing } from 'react-native-reanimated';
 import { SingularityLoader } from '@/components/tv/SingularityLoader';
 import { useScreenGC } from '@/lib/useScreenGC';
@@ -201,7 +201,7 @@ export default function MoviesScreen() {
               <FocusablePressable 
                 className="bg-white px-12 py-6 rounded-[32px] flex-row items-center shadow-2xl shadow-white/10"
                 focusedClassName="bg-red-600 scale-110 shadow-red-600/50"
-                onPress={() => heroMovie && router.push({ pathname: '/modal', params: heroMovie as any })}
+                onPress={() => heroMovie && playVideo(heroMovie)}
               >
                 {({ isFocused }) => (
                   <>
@@ -255,6 +255,7 @@ export default function MoviesScreen() {
         contentContainerStyle={{ paddingBottom: 100 }}
         initialNumToRender={2}
         windowSize={3}
+        removeClippedSubviews={false}
       />
     </View>
   );

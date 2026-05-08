@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Image, FlatList } from 'react-native';
+import { View, Text, FlatList } from 'react-native';
+import { Image } from 'expo-image';
 import { 
   Play, 
   Pause, 
@@ -9,91 +10,89 @@ import {
 } from 'lucide-react-native';
 import { FocusablePressable } from './FocusablePressable';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Video } from '@/lib/youtube';
 
 interface KidsVideoPlayerOverlayProps {
   title: string;
   isPlaying: boolean;
   progress: number;
   onClose: () => void;
+  onTogglePlay?: () => void;
+  upNext?: Video[];
+  onSelectVideo?: (video: Video) => void;
 }
-
-const kidsUpNext = [
-  { id: 'k1', title: 'Baby Shark Dance', thumbnail: 'https://images.unsplash.com/photo-1560130954-383789d6e40d?w=400', duration: '2:16', color: '#FF5C5C' },
-  { id: 'k2', title: 'CoComelon Fun', thumbnail: 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=400', duration: '4:15', color: '#3B82F6' },
-  { id: 'k3', title: 'Peppa Pig Playtime', thumbnail: 'https://images.unsplash.com/photo-1533518463841-d62e1fc91373?w=400', duration: '5:45', color: '#10B981' },
-];
 
 export function KidsVideoPlayerOverlay({
   title,
   isPlaying,
   progress,
-  onClose
+  onClose,
+  onTogglePlay,
+  upNext = [],
+  onSelectVideo
 }: KidsVideoPlayerOverlayProps) {
   return (
-    <View className="absolute inset-0 bg-black/20">
+    <View className="absolute inset-0 bg-black/40">
       {/* Top Bar: Close Button */}
       <View className="p-10 flex-row justify-end">
         <FocusablePressable 
           onPress={onClose}
+          nativeID="kids-close"
           className="bg-white/90 p-6 rounded-full shadow-2xl"
           focusedClassName="bg-white scale-125 border-4 border-[#FFD700]"
+          nextFocusDown="kids-rail"
         >
           <X size={48} color="#2D3436" strokeWidth={4} />
         </FocusablePressable>
       </View>
 
-      {/* Center: Play/Pause Big Button */}
-      <View className="flex-1 items-center justify-center">
-        <FocusablePressable 
-          className="bg-white p-12 rounded-full shadow-2xl border-8 border-transparent"
-          focusedClassName="border-[#FFD700] scale-125"
-          activeScale={1.2}
-        >
-          {isPlaying ? (
-            <Pause size={80} color="#2D3436" fill="#2D3436" />
-          ) : (
-            <Play size={80} color="#2D3436" fill="#2D3436" className="ml-3" />
-          )}
-        </FocusablePressable>
-      </View>
+      {/* Center: Clear Area for Video */}
+      <View className="flex-1" />
 
-      {/* Bottom Section: Scrubber and Shelf */}
-      <View className="pb-12">
-        {/* Playful Scrubber */}
-        <View className="px-20 mb-12">
-          <View className="h-4 w-full bg-white/30 rounded-full overflow-hidden">
-            <View 
-              className="h-full bg-[#FF5C5C] rounded-full" 
-              style={{ width: `${progress * 100}%` }} 
-            />
-          </View>
-          <Text className="text-white text-3xl font-black mt-6 text-center shadow-lg">{title}</Text>
-        </View>
-
-        {/* Kids Shelf */}
-        <View>
+      {/* Bottom Section: Integrated Controls */}
+      <View className="absolute bottom-0 left-0 right-0 pb-10">
+        
+        {/* Playful Shelf - Pushed down above controls */}
+        <View className="mb-8">
           <FlatList
             horizontal
-            data={kidsUpNext}
+            data={upNext}
             keyExtractor={(item) => item.id}
+            removeClippedSubviews={false}
             contentContainerStyle={{ paddingHorizontal: 60 }}
             showsHorizontalScrollIndicator={false}
-            renderItem={({ item }) => (
+            renderItem={({ item, index }) => (
               <View className="mr-8">
                 <FocusablePressable
-                  className="w-80 bg-white rounded-[32px] p-2 overflow-hidden border-8 border-transparent"
-                  focusedClassName="border-[#FFD700] scale-105 shadow-2xl shadow-blue-500/40"
-                  activeScale={1.05}
+                  onPress={() => onSelectVideo?.(item)}
+                  nativeID={index === 0 ? "kids-rail" : undefined}
+                  className="w-64 bg-[#2D3436] rounded-[40px] p-2.5 overflow-hidden border-[6px] border-transparent shadow-2xl"
+                  focusedClassName="border-[#FFD700] scale-110 shadow-[#FFD700]/30"
+                  activeScale={1.1}
+                  nextFocusUp="kids-close"
+                  nextFocusDown="kids-play"
+                  style={{
+                    // Custom focus shadow for Kids mode
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowRadius: 30,
+                  }}
                 >
                   <View>
-                    <View className="aspect-video relative rounded-[24px] overflow-hidden">
-                      <Image source={{ uri: item.thumbnail }} className="w-full h-full" />
-                      <View className="absolute bottom-3 right-3 bg-black/70 px-3 py-1 rounded-full">
-                        <Text className="text-white text-sm font-black">{item.duration}</Text>
+                    <View className="aspect-video relative rounded-[32px] overflow-hidden bg-black/20">
+                      <Image 
+                        source={{ uri: item.thumbnail }} 
+                        style={{ width: '100%', height: '100%' }}
+                        contentFit="cover"
+                        transition={300}
+                      />
+                      <View className="absolute bottom-3 right-3 bg-[#FF4B4B] px-3 py-1 rounded-full border-2 border-white">
+                        <Text className="text-white text-[12px] font-black">{item.duration}</Text>
                       </View>
                     </View>
-                    <View className="py-4 px-3 items-center">
-                      <Text className="text-[#2D3436] font-black text-xl text-center" numberOfLines={1}>{item.title}</Text>
+                    <View className="p-3">
+                      <Text className="text-white text-base font-black tracking-tight" numberOfLines={1}>
+                        {item.title}
+                      </Text>
                     </View>
                   </View>
                 </FocusablePressable>
@@ -101,7 +100,46 @@ export function KidsVideoPlayerOverlay({
             )}
           />
         </View>
+
+        {/* Control Bar: Play/Pause + Scrubber */}
+        <View className="px-20 flex-row items-center">
+          {/* Play/Pause Button - Integrated into bottom bar */}
+          <FocusablePressable 
+            onPress={onTogglePlay}
+            nativeID="kids-play"
+            hasTVPreferredFocus
+            className="bg-[#FF4B4B] p-8 rounded-full shadow-2xl border-4 border-white mr-10"
+            focusedClassName="border-[#FFD700] scale-110"
+            activeScale={1.1}
+            nextFocusUp="kids-rail"
+          >
+            {isPlaying ? (
+              <Pause size={48} color="white" fill="white" />
+            ) : (
+              <Play size={48} color="white" fill="white" className="ml-2" />
+            )}
+          </FocusablePressable>
+
+          {/* Scrubber & Title Row */}
+          <View className="flex-1">
+            <View className="h-4 w-full bg-white/30 rounded-full overflow-hidden border-2 border-white/20">
+              <View 
+                className="h-full bg-[#4BFF7B] rounded-full" 
+                style={{ width: `${progress * 100}%` }} 
+              />
+            </View>
+            <View className="flex-row justify-between items-center mt-3">
+              <Text className="text-white text-2xl font-black shadow-lg uppercase tracking-widest flex-1 mr-4" numberOfLines={1}>
+                {title}
+              </Text>
+              <View className="bg-black/40 px-4 py-2 rounded-full border border-white/10">
+                 <Text className="text-white/80 font-black text-lg">KIDS MODE</Text>
+              </View>
+            </View>
+          </View>
+        </View>
       </View>
     </View>
   );
 }
+

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, memo, useRef } from 'react';
 import { View, Text, Image, FlatList, useWindowDimensions, ActivityIndicator, StyleSheet } from 'react-native';
-import { FocusablePressable } from '@/components/tv/FocusablePressable';
 import { useRouter } from 'expo-router';
+import { FocusablePressable } from '@/components/tv/FocusablePressable';
+import { playVideo } from '@/lib/navigation';
 import { LinearGradient } from 'expo-linear-gradient';
 import { youtubeService, Video } from '@/lib/youtube';
 import { useAppStore } from '@/lib/store';
@@ -99,12 +100,50 @@ export default function LiveGuideScreen() {
   
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFocusedIdRef = useRef<string | null>(null);
+  const activePreviewSourceRef = useRef<string | null>(null);
 
-  const player = useVideoPlayer(previewUrl || '', (p) => {
+  const player = useVideoPlayer(null, (p) => {
     p.loop = true;
     p.volume = 0;
-    p.play();
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function replacePreviewSource() {
+      if (activePreviewSourceRef.current === previewUrl) return;
+      activePreviewSourceRef.current = previewUrl;
+
+      if (!previewUrl) {
+        player.pause();
+        await player.replaceAsync(null);
+        return;
+      }
+
+      await player.replaceAsync(previewUrl);
+      if (!cancelled && isPreviewPlaying) {
+        player.play();
+      }
+    }
+
+    replacePreviewSource().catch((error) => {
+      console.warn('[LiveGuide] Preview source failed:', error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [player, previewUrl, isPreviewPlaying]);
+
+  useEffect(() => {
+    if (!previewUrl) return;
+
+    if (isPreviewPlaying) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [player, previewUrl, isPreviewPlaying]);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,7 +225,7 @@ export default function LiveGuideScreen() {
                  <FocusablePressable 
                     className="bg-white px-12 py-6 rounded-3xl flex-row items-center"
                     focusedClassName="bg-red-600 scale-110 shadow-2xl shadow-red-600/50"
-                    onPress={() => focusedVideo && router.push({ pathname: '/modal', params: focusedVideo as any })}
+                    onPress={() => focusedVideo && playVideo(focusedVideo)}
                  >
                     {({ isFocused }) => (
                        <>
@@ -262,12 +301,13 @@ export default function LiveGuideScreen() {
           data={videos}
           keyExtractor={(v, i) => `live-${v.id}-${i}`}
           showsHorizontalScrollIndicator={false}
+          removeClippedSubviews={false}
           contentContainerStyle={{ paddingHorizontal: isCompact ? 16 : 48, gap: 24 }}
           renderItem={({ item }) => (
             <LiveVideoCard 
               video={item} 
               onFocus={() => handleFocusVideo(item)}
-              onPress={() => router.push({ pathname: '/modal', params: item as any })}
+              onPress={() => playVideo(item)}
             />
           )}
         />

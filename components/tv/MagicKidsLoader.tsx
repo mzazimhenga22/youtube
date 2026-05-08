@@ -1,11 +1,12 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
-import Animated, { 
-  useAnimatedStyle, 
-  useSharedValue, 
-  withTiming, 
-  withRepeat, 
-  withSequence, 
+import { View, Text, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  withRepeat,
+  withSequence,
   withSpring,
   withDelay,
   Easing,
@@ -14,14 +15,12 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Star, Heart, Cloud, Zap, Play } from 'lucide-react-native';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
 /**
  * MAGIC KIDS LOADER: A PLAYFUL, BOUNCY LOADING EXPERIENCE
  * Designed to fit the colorful aesthetic of Kids Mode
  */
 
-export const MagicKidsLoader = () => {
+export function MagicKidsLoader() {
   const jump = useSharedValue(0);
   const rotate = useSharedValue(0);
   const scale = useSharedValue(1);
@@ -66,10 +65,14 @@ export const MagicKidsLoader = () => {
 
   return (
     <View style={styles.container}>
+      <Image
+        source={require('@/assets/kidscreenbg.png')}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+      />
       {/* Background Playful Shapes */}
-      <View style={[styles.bgShape, { top: '10%', left: '15%', backgroundColor: '#FF4B4B22' }]} />
-      <View style={[styles.bgShape, { bottom: '15%', right: '10%', backgroundColor: '#4B7BFF22', width: 300, height: 300 }]} />
-      
+      <BackgroundShapes />
+
       <Animated.View entering={FadeIn.duration(800)} style={styles.center}>
         {/* Rotating Rainbow Ring */}
         <Animated.View style={[styles.ringContainer, rotateStyle]}>
@@ -88,19 +91,34 @@ export const MagicKidsLoader = () => {
         </Animated.View>
 
         <Text style={styles.loadingText}>FINDING MAGIC...</Text>
-        
-        <View style={styles.iconRow}>
-          <FloatingIcon Icon={Star} color="#FFD600" delay={0} />
-          <FloatingIcon Icon={Heart} color="#FF4081" delay={200} />
-          <FloatingIcon Icon={Cloud} color="#00E5FF" delay={400} />
-          <FloatingIcon Icon={Zap} color="#FFD600" delay={600} />
-        </View>
+
+        <FloatingIconRow />
       </Animated.View>
     </View>
   );
-};
+}
 
-const FloatingIcon = ({ Icon, color, delay }: any) => {
+function BackgroundShapes() {
+  return (
+  <>
+    <View style={[styles.bgShape, { top: '10%', left: '15%', backgroundColor: '#FF4B4B22' }]} />
+    <View style={[styles.bgShape, { bottom: '15%', right: '10%', backgroundColor: '#4B7BFF22', width: 300, height: 300 }]} />
+  </>
+  );
+}
+
+function FloatingIconRow() {
+  return (
+  <View style={styles.iconRow}>
+    <FloatingIcon Icon={Star} color="#FFD600" delay={0} />
+    <FloatingIcon Icon={Heart} color="#FF4081" delay={200} />
+    <FloatingIcon Icon={Cloud} color="#00E5FF" delay={400} />
+    <FloatingIcon Icon={Zap} color="#FFD600" delay={600} />
+  </View>
+  );
+}
+
+function FloatingIcon({ Icon, color, delay }: any) {
   const y = useSharedValue(0);
   useEffect(() => {
     y.value = withRepeat(
@@ -111,19 +129,19 @@ const FloatingIcon = ({ Icon, color, delay }: any) => {
       -1,
       true
     );
-  }, []);
+  }, [delay, y]);
   const style = useAnimatedStyle(() => ({ transform: [{ translateY: y.value }] }));
   return (
     <Animated.View style={[{ marginHorizontal: 12 }, style]}>
       <Icon size={32} color={color} fill={color} />
     </Animated.View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFBE6',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',

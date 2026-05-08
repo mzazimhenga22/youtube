@@ -39,7 +39,7 @@ const ShortsAmbientBg = memo(({ thumbnail }: { thumbnail: string | null }) => {
        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#050505' }]} />
        {thumbnail && (
          <Animated.View style={[StyleSheet.absoluteFill, bgStyle]}>
-            <Image source={{ uri: thumbnail }} style={StyleSheet.absoluteFill} blurRadius={70} />
+            <Image source={{ uri: thumbnail }} style={StyleSheet.absoluteFill} />
             <LinearGradient colors={['rgba(5,5,5,0.4)', 'rgba(5,5,5,0.8)', '#050505']} style={StyleSheet.absoluteFill} />
          </Animated.View>
        )}
@@ -140,7 +140,7 @@ export default function ShortsScreen() {
                  <Image source={{ uri: focusedShort.thumbnail }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                  <LinearGradient colors={['transparent', 'rgba(0,0,0,0.6)']} style={StyleSheet.absoluteFill} />
                  <View className="absolute inset-0 items-center justify-center">
-                    <View className="bg-white/20 p-6 rounded-full backdrop-blur-md">
+                    <View className="bg-white/20 p-6 rounded-full">
                        <Play size={48} color="white" fill="white" />
                     </View>
                  </View>
@@ -239,6 +239,7 @@ export default function ShortsScreen() {
           data={videos}
           keyExtractor={(v, i) => `short-${v.id}-${i}`}
           showsHorizontalScrollIndicator={false}
+          removeClippedSubviews={false}
           contentContainerStyle={{ paddingHorizontal: isCompact ? 16 : 48, gap: 24 }}
           renderItem={({ item }) => (
             <ShortCard 

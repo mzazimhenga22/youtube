@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
-import { Video } from './youtube';
+import { Video, youtubeService } from './youtube';
+import { useAppStore } from './store';
 
 export const parseDuration = (duration: string): number => {
   if (!duration || duration.toUpperCase().includes('LIVE')) return 9999; // Treat live as long
@@ -17,33 +18,68 @@ export const parseDuration = (duration: string): number => {
   return 0;
 };
 
-export const playVideo = (video: Video) => {
-  const seconds = parseDuration(video.duration);
-  const isLive = video.duration?.toUpperCase().includes('LIVE');
+export const playVideo = async (video: Video, extraParams: Record<string, any> = {}, replace = false) => {
+  const { currentProfile, setGlobalLoading, setGlobalPlayback } = useAppStore.getState();
   
-  // Logic: < 2 minutes (120s) and NOT LIVE -> Shorts Player
-  if (seconds < 120 && !isLive) {
-    router.push({
-      pathname: '/shorts-player',
-      params: { 
-        id: video.id,
-        title: video.title,
-        thumbnail: video.thumbnail,
-        channel: video.channel
-      }
-    });
-  } else {
-    // Standard Player (Modal)
-    router.push({
-      pathname: "/modal",
-      params: { 
-        id: video.id,
-        title: video.title,
-        channel: video.channel,
-        views: video.views,
-        thumbnail: video.thumbnail,
-        duration: video.duration
-      }
-    });
+  const navigate = replace ? router.replace : router.push;
+  
+  setGlobalLoading(true);
+  try {
+    const stream = await youtubeService.getStream(video.id);
+    
+    if (stream) {
+      setGlobalPlayback(video, stream.url);
+    }
+    
+    if (currentProfile?.mode === 'kids') {
+      navigate({
+        pathname: '/kids-player',
+        params: { 
+          id: video.id, 
+          title: video.title, 
+          thumbnail: video.thumbnail,
+          url: stream?.url,
+          ...extraParams
+        }
+      });
+      return;
+    }
+
+    const seconds = parseDuration(video.duration);
+    const isLive = video.duration?.toUpperCase().includes('LIVE');
+    
+    // Logic: < 2 minutes (120s) and NOT LIVE -> Shorts Player
+    if (seconds < 120 && !isLive) {
+      navigate({
+        pathname: '/shorts-player',
+        params: { 
+          id: video.id,
+          title: video.title,
+          thumbnail: video.thumbnail,
+          channel: video.channel,
+          url: stream?.url, // Pass the URL if we already fetched it
+          mimeType: stream?.mimeType,
+          ...extraParams
+        }
+      });
+    } else {
+      // Standard Player (Modal)
+      navigate({
+        pathname: "/modal",
+        params: { 
+          id: video.id,
+          title: video.title,
+          channel: video.channel,
+          views: video.views,
+          thumbnail: video.thumbnail,
+          duration: video.duration,
+          ...extraParams
+        }
+      });
+    }
+  } catch (e) {
+    console.error('[Navigation] Failed to play video:', e);
+  } finally {
+    setGlobalLoading(false);
   }
 };

@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, Image, FlatList, ScrollView, useWindowDimensions, StyleSheet, Pressable } from 'react-native';
+import { View, Text, FlatList, ScrollView, useWindowDimensions, StyleSheet, Pressable } from 'react-native';
+import { Image } from 'expo-image';
 import {
   Play, Pause, ThumbsUp, ThumbsDown, MessageSquare, ClosedCaption,
   Settings, Activity, Zap, ChevronRight, MonitorPlay, Gauge,
-  MessageCircle, VolumeX, Flag, SkipForward, SkipBack, Radio, Music,
+  MessageCircle, VolumeX, Flag, SkipForward, SkipBack, Radio, Music, X,
 } from 'lucide-react-native';
 import { FocusablePressable } from './FocusablePressable';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Video } from '@/lib/youtube';
-import { useRouter } from 'expo-router';
+import { playVideo } from '@/lib/navigation';
 import Animated, {
   useAnimatedStyle, useSharedValue, withTiming, interpolate, FadeIn,
 } from 'react-native-reanimated';
@@ -42,6 +43,7 @@ interface VideoPlayerOverlayProps {
   onSeek?: (delta: number) => void;
   onNext?: () => void;
   onSetSpeed?: (speed: number) => void;
+  onClose?: () => void;
 }
 
 type OverlayZone = 'hidden' | 'controls' | 'cards';
@@ -71,14 +73,15 @@ export function VideoPlayerOverlay({
   onSeek,
   onNext,
   onSetSpeed,
+  onClose,
 }: VideoPlayerOverlayProps) {
-  const router = useRouter();
   const [showStats, setShowStats] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [zone, setZone] = useState<OverlayZone>('controls');
   const [seekIndicator, setSeekIndicator] = useState<string | null>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekIndicatorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isClosingRef = useRef(false);
   const clampedProgress = Math.max(0, Math.min(1, Number.isFinite(progress) ? progress : 0));
 
   const { width: screenWidth } = useWindowDimensions();
@@ -180,6 +183,13 @@ export function VideoPlayerOverlay({
     opacity: interpolate(cardsTranslateY.value, [100, 0], [0, 1]),
   }));
 
+  const handleClose = useCallback(() => {
+    if (!onClose) return;
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+    requestAnimationFrame(() => onClose());
+  }, [onClose]);
+
   return (
     <View className="absolute inset-0" pointerEvents="box-none">
       {/* Tap-to-wake — non-focusable so it doesn't steal D-pad focus */}
@@ -187,6 +197,7 @@ export function VideoPlayerOverlay({
         onPress={handleAnyInteraction}
         style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 5 }}
         pointerEvents={zone === 'hidden' ? 'auto' : 'box-none'}
+        focusable={false}
       >
         <View style={{ flex: 1 }} />
       </Pressable>
@@ -205,6 +216,20 @@ export function VideoPlayerOverlay({
       )}
 
       {/* Mini Progress Bar — visible when controls are hidden */}
+      {/* Exit Button */}
+      <View className="absolute top-10 left-10 z-[120]">
+        <FocusablePressable
+          onPress={handleClose}
+          className="w-14 h-14 bg-white/10 rounded-full items-center justify-center border border-white/10"
+          focusedClassName="bg-white scale-110"
+          activeScale={0.92}
+        >
+          {({ isFocused }) => (
+            <X size={28} color={isFocused ? 'black' : 'white'} strokeWidth={3} />
+          )}
+        </FocusablePressable>
+      </View>
+
       <Animated.View
         style={miniBarAnimStyle}
         className="absolute bottom-0 left-0 right-0 z-30 px-0"
@@ -227,6 +252,7 @@ export function VideoPlayerOverlay({
             <StatRow label="Buffer" value="18.2s" />
             <FocusablePressable
               onPress={() => setShowStats(false)}
+              hasTVPreferredFocus
               className="mt-5 bg-white/10 py-3 rounded-full items-center"
               focusedClassName="bg-white"
             >
@@ -243,9 +269,9 @@ export function VideoPlayerOverlay({
         <View className="absolute inset-0 z-[100] items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}>
           <View className="bg-zinc-900 border border-white/10 rounded-3xl shadow-2xl" style={{ width: Math.min(420, screenWidth * 0.88), padding: 28 }}>
             <Text className="text-white text-2xl font-black mb-6 tracking-tight">Settings</Text>
-            
+
             <SettingsRow icon={MonitorPlay} label="Quality" value="Auto (1080p)" />
-            
+
             <View className="mb-4">
               <View className="flex-row items-center mb-3" style={{ gap: 10 }}>
                 <Gauge size={22} color="white" opacity={0.7} />
@@ -257,6 +283,7 @@ export function VideoPlayerOverlay({
                     key={speed}
                     onPress={() => onSetSpeed?.(speed)}
                     onFocus={handleAnyInteraction}
+                    hasTVPreferredFocus={speed === playbackSpeed}
                     className={`px-4 py-2 rounded-xl border ${playbackSpeed === speed ? 'bg-red-600 border-red-600' : 'bg-white/5 border-white/10'}`}
                     focusedClassName="bg-white"
                   >
@@ -290,6 +317,7 @@ export function VideoPlayerOverlay({
         style={controlsAnimStyle}
         className="absolute inset-0 z-40 justify-end"
         pointerEvents={zone === 'controls' ? 'auto' : 'none'}
+        focusable={false}
       >
         {/* Bottom gradient */}
         <LinearGradient
@@ -315,7 +343,7 @@ export function VideoPlayerOverlay({
             </View>
             <View className="flex-row items-center">
               <View className="w-8 h-8 md:w-10 md:h-10 rounded-full overflow-hidden mr-3 border-2 border-white/20">
-                <Image source={{ uri: channelAvatar }} className="w-full h-full" />
+                <Image source={{ uri: channelAvatar }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
               </View>
               <Text className="text-white/50 text-lg md:text-xl font-bold">{channelName}</Text>
               {(views || publishedAt) && (
@@ -339,9 +367,11 @@ export function VideoPlayerOverlay({
           <View className="mb-2 md:mb-4">
             <FocusablePressable
               onFocus={handleAnyInteraction}
+              nativeID="player-scrubber"
               className="py-3"
               focusedClassName=""
               activeScale={1}
+              nextFocusDown="player-play"
             >
               <View className="w-full bg-white/20 rounded-full relative overflow-visible" style={{ height: 6 }}>
                 {/* Background segments if chapters exist */}
@@ -358,10 +388,10 @@ export function VideoPlayerOverlay({
                 ) : null}
 
                 <View className="h-full bg-red-600 rounded-full" style={{ width: `${clampedProgress * 100}%` }} />
-                
+
                 {/* Chapter Notches */}
                 {chapters?.map((chapter: any, i: number) => (
-                    <View 
+                    <View
                         key={i}
                         className="absolute h-full w-[3px] bg-black/40"
                         style={{ left: `${(chapter.time / Math.max(1, totalDurationSeconds)) * 100}%` }}
@@ -386,9 +416,9 @@ export function VideoPlayerOverlay({
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <IconButton icon={ThumbsUp} onFocus={handleAnyInteraction} />
               <IconButton icon={ThumbsDown} onFocus={handleAnyInteraction} />
-              <IconButton 
-                icon={MessageSquare} 
-                onPress={onToggleComments} 
+              <IconButton
+                icon={MessageSquare}
+                onPress={onToggleComments}
                 onFocus={handleAnyInteraction}
                 badge={commentsCount}
               />
@@ -418,9 +448,13 @@ export function VideoPlayerOverlay({
               <FocusablePressable
                 onPress={() => { onTogglePlay?.(); handleAnyInteraction(); }}
                 onFocus={handleAnyInteraction}
+                hasTVPreferredFocus={zone === 'controls' && !showSettings && !showStats}
+                nativeID="player-play"
                 className="w-16 h-16 md:w-20 md:h-20 bg-white rounded-full items-center justify-center shadow-2xl shadow-white/20"
                 focusedClassName="scale-110 bg-zinc-100"
                 activeScale={0.9}
+                nextFocusUp="player-scrubber"
+                nextFocusDown="player-to-cards"
               >
                 {isPlaying ? <Pause size={32} color="black" fill="black" /> : <Play size={32} color="black" fill="black" style={{ marginLeft: 3 }} />}
               </FocusablePressable>
@@ -465,11 +499,14 @@ export function VideoPlayerOverlay({
 
           {/* Down arrow — navigate to cards zone */}
           <FocusablePressable
+            nativeID="player-to-cards"
             onPress={() => setZone('cards')}
-            onFocus={() => { setZone('cards'); }}
+            onFocus={() => { if (zone !== 'cards') setZone('cards'); }}
             style={{ alignItems: 'center', marginTop: 6, paddingVertical: 4 }}
             focusedClassName="opacity-100"
             activeScale={1}
+            nextFocusUp="player-play"
+            nextFocusDown="player-recommendations"
           >
             <ChevronRight size={20} color="white" style={{ transform: [{ rotate: '90deg' }], opacity: 0.5 }} />
           </FocusablePressable>
@@ -500,6 +537,8 @@ export function VideoPlayerOverlay({
             style={{ alignItems: 'center', paddingVertical: 8 }}
             focusedClassName="opacity-100"
             activeScale={1}
+            nextFocusUp="player-to-cards"
+            nextFocusDown="player-recommendations"
           >
             <ChevronRight size={20} color="white" style={{ transform: [{ rotate: '-90deg' }], opacity: 0.4 }} />
           </FocusablePressable>
@@ -517,16 +556,16 @@ export function VideoPlayerOverlay({
                   contentContainerStyle={{ paddingHorizontal: screenWidth < 768 ? 24 : 64, paddingBottom: 8 }}
                   showsHorizontalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled"
-                  renderItem={({ item }) => (
+                  removeClippedSubviews={false}
+                  renderItem={({ item, index }) => (
                     <RecommendationCard
                       video={item}
+                      nativeID={index === 0 ? "player-recommendations" : undefined}
                       width={cardWidth}
                       thumbnailHeight={thumbnailHeight}
-                      onPress={() => router.push({
-                        pathname: '/modal',
-                        params: item as any
-                      })}
+                      onPress={() => playVideo(item)}
                       onFocus={() => { if (zone !== 'cards') setZone('cards'); }}
+                      nextFocusUp="player-to-cards"
                     />
                   )}
                 />
@@ -539,7 +578,14 @@ export function VideoPlayerOverlay({
                   contentContainerStyle={{ paddingHorizontal: screenWidth < 768 ? 24 : 64, paddingBottom: 8 }}
                   showsHorizontalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled"
-                  renderItem={() => <LoadingRecommendationCard width={cardWidth} thumbnailHeight={thumbnailHeight} />}
+                  removeClippedSubviews={false}
+                  renderItem={({ index }) => (
+                    <LoadingRecommendationCard 
+                      nativeID={index === 0 ? "player-recommendations" : undefined}
+                      width={cardWidth} 
+                      thumbnailHeight={thumbnailHeight} 
+                    />
+                  )}
                 />
               )}
             </View>
@@ -552,7 +598,7 @@ export function VideoPlayerOverlay({
 
 function IconButton({ icon: Icon, onPress, active, onFocus, badge }: any) {
   return (
-    <FocusablePressable 
+    <FocusablePressable
       onPress={onPress}
       onFocus={onFocus}
       className={`p-3 md:p-4 rounded-full relative ${active ? 'bg-red-600' : 'bg-white/10'}`}
@@ -572,9 +618,9 @@ function IconButton({ icon: Icon, onPress, active, onFocus, badge }: any) {
   );
 }
 
-function LoadingRecommendationCard({ width, thumbnailHeight }: { width: number; thumbnailHeight: number }) {
+function LoadingRecommendationCard({ width, thumbnailHeight, nativeID }: { width: number; thumbnailHeight: number; nativeID?: string }) {
   return (
-    <View className="mr-5" style={{ width }}>
+    <View className="mr-5" style={{ width }} nativeID={nativeID}>
       <View className="bg-white/10 rounded-lg border border-white/10 overflow-hidden" style={{ height: thumbnailHeight }}>
         <View className="absolute inset-0 bg-zinc-800/80" />
       </View>
@@ -586,29 +632,43 @@ function LoadingRecommendationCard({ width, thumbnailHeight }: { width: number; 
   );
 }
 
-function RecommendationCard({ video, width, thumbnailHeight, onPress, onFocus }: { video: Video; width: number; thumbnailHeight: number; onPress: () => void; onFocus?: () => void }) {
+function RecommendationCard({ video, width, thumbnailHeight, onPress, onFocus, nativeID, nextFocusUp }: { video: Video; width: number; thumbnailHeight: number; onPress: () => void; onFocus?: () => void; nativeID?: string; nextFocusUp?: string }) {
   return (
     <FocusablePressable
       onPress={onPress}
       onFocus={onFocus}
-      className="mr-5 rounded-xl overflow-hidden border-[3px] border-transparent"
+      nativeID={nativeID}
+      nextFocusUp={nextFocusUp}
+      className="mr-5 rounded-2xl overflow-hidden border-[4px] border-transparent"
       focusedClassName="border-white scale-105"
       activeScale={0.98}
-      style={{ width }}
+      style={{ 
+        width,
+        // Focus Glow
+        shadowColor: '#FFFFFF',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.25,
+        shadowRadius: 20,
+      }}
     >
       {({ isFocused }) => (
         <View>
-          <View className="bg-zinc-900 rounded-lg overflow-hidden" style={{ height: thumbnailHeight }}>
-            <Image source={{ uri: video.thumbnail }} className="w-full h-full" resizeMode="cover" />
-            <View className="absolute bottom-2 right-2 bg-black/85 px-2 py-1 rounded">
+          <View className="bg-zinc-900 rounded-xl overflow-hidden" style={{ height: thumbnailHeight }}>
+            <Image 
+              source={{ uri: video.thumbnail }} 
+              style={StyleSheet.absoluteFill}
+              contentFit="cover" 
+              transition={200}
+            />
+            <View className="absolute bottom-2 right-2 bg-black/85 px-2 py-1 rounded-lg border border-white/10">
               <Text className="text-white text-xs font-black">{video.duration}</Text>
             </View>
           </View>
-          <View className="pt-3">
-            <Text className={`text-base font-black leading-tight ${isFocused ? 'text-white' : 'text-zinc-200'}`} numberOfLines={2}>
+          <View className="pt-3 px-1">
+            <Text className={`text-base font-black leading-tight ${isFocused ? 'text-white' : 'text-zinc-300'}`} numberOfLines={2}>
               {video.title}
             </Text>
-            <Text className="text-zinc-500 text-sm font-semibold mt-1" numberOfLines={1}>
+            <Text className="text-zinc-500 text-sm font-bold mt-1" numberOfLines={1}>
               {video.channel}
             </Text>
           </View>
@@ -631,7 +691,7 @@ function StatRow({ label, value }: { label: string, value: string }) {
 
 function SettingsRow({ icon: Icon, label, value }: any) {
   return (
-    <FocusablePressable 
+    <FocusablePressable
       className="flex-row items-center justify-between py-3 px-4 mb-1 rounded-xl"
       focusedClassName="bg-white/15 scale-[1.01]"
     >

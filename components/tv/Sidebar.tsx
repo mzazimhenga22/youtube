@@ -71,93 +71,109 @@ export function Sidebar({ side = 'left' }: { side?: 'left' | 'right' }) {
   const navItems = side === 'left' ? LEFT_NAV_ITEMS : RIGHT_NAV_ITEMS;
 
   return (
-    /* Fixed-width slot in the flex row — sidebar overlays content when expanded */
-    <View style={{ width: COLLAPSED_WIDTH, zIndex: 120 }}>
+    /*
+     * Outer container — sized to EXPANDED_WIDTH so all focusable items
+     * remain inside the container even when expanded.
+     * pointerEvents="box-none" ensures the transparent area doesn't
+     * block touch/focus from reaching the content beneath.
+     */
+    <View
+      style={{
+        position: 'absolute',
+        top: 0,
+        bottom: 0,
+        [side]: 0,
+        width: EXPANDED_WIDTH + 40,
+        zIndex: 150,
+      }}
+      pointerEvents="box-none"
+    >
       <Animated.View
         style={[
           sidebarStyle,
           {
             position: 'absolute',
-            top: 20,
-            bottom: 20,
-            [side]: 12,
-            backgroundColor: 'rgba(12, 12, 12, 0.92)',
-            /* Soft rounded corners for modern floating look */
+            top: 40,
+            bottom: 40,
+            [side]: 20,
+            /* No overflow:hidden — critical for TV focus engine.
+               Clipping is handled by borderRadius on individual items. */
+            backgroundColor: 'transparent',
             borderRadius: 32,
-            borderWidth: 1,
-            borderColor: 'rgba(255,255,255,0.06)',
-            overflow: 'hidden',
           },
         ]}
       >
-        {/* Subtle Side Aura */}
-        <LinearGradient
-          colors={['rgba(255, 255, 255, 0.03)', 'transparent']}
-          start={{ x: side === 'left' ? 0 : 1, y: 0.5 }}
-          end={{ x: side === 'left' ? 1 : 0, y: 0.5 }}
-          style={StyleSheet.absoluteFill}
-          pointerEvents="none"
-        />
-
         <ScrollView
           contentContainerStyle={{
             flexGrow: 1,
             alignItems: 'center',
-            paddingVertical: isSmallScreen ? 20 : 30,
+            paddingTop: isSmallScreen ? 30 : 40, // Increased by 10px
+            paddingBottom: isSmallScreen ? 20 : 30,
           }}
           showsVerticalScrollIndicator={false}
           scrollEnabled={isExpanded}
+          /* Allow focus to escape the ScrollView when pressing
+             LEFT/RIGHT — critical for TV sidebar-to-content traversal */
+          nestedScrollEnabled={false}
         >
           {/* ── Profile avatar (left sidebar only) ── */}
           {side === 'left' && (
-            <FocusablePressable
-              onPress={() => router.push('/profile' as any)}
-              onFocus={expand}
-              onBlur={collapse}
-              nativeID="sidebar-left-profile"
-              style={{
-                width: isSmallScreen ? 36 : 42,
-                height: isSmallScreen ? 36 : 42,
-                borderRadius: 21,
-                overflow: 'hidden',
-                borderWidth: 2,
-                borderColor: 'transparent',
-                marginBottom: 16,
-              }}
-              focusedClassName="border-white scale-110"
-            >
-              {currentProfile?.avatar ? (
-                <Image source={{ uri: currentProfile.avatar }} style={{ width: '100%', height: '100%' }} />
-              ) : (
-                <View style={{ width: '100%', height: '100%', backgroundColor: '#1F1F1F', alignItems: 'center', justifyContent: 'center' }}>
-                  <User size={isSmallScreen ? 18 : 20} color="white" />
-                </View>
-              )}
-            </FocusablePressable>
+            <View style={{ marginTop: 10, marginBottom: 24 }}>
+              <FocusablePressable
+                onPress={() => router.push('/profile' as any)}
+                onFocus={expand}
+                onBlur={collapse}
+                nativeID="sidebar-left-profile"
+                style={{
+                  width: isSmallScreen ? 48 : 56,
+                  height: isSmallScreen ? 48 : 56,
+                  borderRadius: 28,
+                  overflow: 'hidden',
+                  borderWidth: 3,
+                  borderColor: 'rgba(255,255,255,0.15)',
+                  backgroundColor: '#181818', // Solid dark background
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                focusedClassName="border-white scale-110 shadow-2xl"
+              >
+                {currentProfile?.avatar ? (
+                  <Image
+                    source={typeof currentProfile.avatar === 'string' ? { uri: currentProfile.avatar } : currentProfile.avatar}
+                    style={{ width: '100%', height: '100%' }}
+                  />
+                ) : (
+                  <User size={isSmallScreen ? 24 : 28} color="white" />
+                )}
+              </FocusablePressable>
+            </View>
           )}
 
           {/* ── Search (right sidebar only) ── */}
           {side === 'right' && (
-            <SidebarItem
-              icon={Search}
-              label="Search"
-              isActive={pathname.includes('/search')}
-              isExpanded={isExpanded}
-              onPress={() => router.push('/search' as any)}
-              onFocus={expand}
-              onBlur={collapse}
-              isSmall={isSmallScreen}
-              side={side}
-              nativeID="sidebar-right-search"
-            />
+            <View style={{ marginTop: 10 }}>
+              <SidebarItem
+                icon={Search}
+                label="Search"
+                isActive={pathname.includes('/search')}
+                isExpanded={isExpanded}
+                onPress={() => router.push('/search' as any)}
+                onFocus={expand}
+                onBlur={collapse}
+                isSmall={isSmallScreen}
+                side={side}
+                nativeID="sidebar-right-search"
+              />
+            </View>
           )}
 
-          {/* Divider */}
+          {/* Divider - Minimalist */}
           <View style={{
-            height: 1,
-            width: isExpanded ? '75%' : isSmallScreen ? 28 : 36,
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            marginVertical: 10,
+            height: 2,
+            width: isExpanded ? '60%' : 24,
+            backgroundColor: 'rgba(255,255,255,0.08)',
+            marginVertical: 16,
+            borderRadius: 1,
           }} />
 
           {/* ── Nav items ── */}
@@ -219,52 +235,60 @@ const SidebarItem = memo(({
     style={{
       flexDirection: isExpanded ? (side === 'right' ? 'row-reverse' : 'row') : 'column',
       alignItems: 'center',
-      paddingVertical: isExpanded ? (isSmall ? 12 : 14) : (isSmall ? 10 : 12),
+      paddingVertical: isExpanded ? (isSmall ? 14 : 16) : (isSmall ? 12 : 14),
       paddingHorizontal: isExpanded ? (isSmall ? 16 : 24) : 0,
-      width: isExpanded ? '88%' : (isSmall ? 44 : 54),
+      width: isExpanded ? '92%' : (isSmall ? 48 : 60),
       alignSelf: 'center',
-      borderRadius: 20,
-      marginVertical: 4,
-      marginHorizontal: isExpanded ? 10 : 4,
-      backgroundColor: isActive && !isExpanded ? 'rgba(255,255,255,0.06)' : 'transparent',
+      borderRadius: 24,
+      marginVertical: 6,
+      marginHorizontal: isExpanded ? 8 : 4,
+      /* Solid backgrounds for the buttons themselves */
+      backgroundColor: isActive ? 'rgba(255,255,255,0.15)' : '#181818',
+      borderWidth: 1,
+      borderColor: isActive ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.05)',
+      /* Individual items clip their own content — NOT the parent */
       overflow: 'hidden',
     }}
-    focusedClassName="bg-white/10"
+    focusedClassName="bg-white scale-105 shadow-2xl"
   >
     {({ isFocused }) => (
       <>
-        {/* Active indicator bar */}
-        {isActive && (
+        {/* Active indicator bar - Vertical Glowing Line */}
+        {isActive && !isFocused && (
           <View
             style={{
               position: 'absolute',
               [side === 'right' ? 'right' : 'left']: 0,
-              top: '20%',
-              bottom: '20%',
-              width: 3,
+              top: '25%',
+              bottom: '25%',
+              width: 4,
               borderRadius: 2,
               backgroundColor: '#FF0000',
+              shadowColor: '#FF0000',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.8,
+              shadowRadius: 8,
             }}
           />
         )}
 
-        <View style={{ width: 26, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: 28, alignItems: 'center', justifyContent: 'center' }}>
           <Icon
-            size={isExpanded ? (isSmall ? 20 : 21) : (isSmall ? 22 : 23)}
-            color={isActive ? '#FFFFFF' : isFocused ? '#E4E4E7' : '#71717A'}
-            strokeWidth={isActive || isFocused ? 2.5 : 1.8}
-            fill={isActive && Icon !== Search ? 'white' : 'none'}
+            size={isExpanded ? (isSmall ? 22 : 24) : (isSmall ? 24 : 26)}
+            color={isFocused ? '#000000' : (isActive ? '#FFFFFF' : '#A1A1AA')}
+            strokeWidth={isActive || isFocused ? 2.5 : 2}
+            fill={isActive && !isFocused && Icon !== Search ? 'white' : 'none'}
           />
         </View>
 
         {isExpanded ? (
           <Text
             style={{
-              fontSize: isSmall ? 15 : 16,
-              color: isActive ? '#FFFFFF' : isFocused ? '#E4E4E7' : '#A1A1AA',
-              fontWeight: isActive ? '900' : '700',
-              letterSpacing: -0.3,
-              [side === 'right' ? 'marginRight' : 'marginLeft']: 14,
+              fontSize: isSmall ? 16 : 18,
+              color: isFocused ? '#000000' : (isActive ? '#FFFFFF' : '#A1A1AA'),
+              fontWeight: '900',
+              letterSpacing: -0.4,
+              [side === 'right' ? 'marginRight' : 'marginLeft']: 16,
             }}
             numberOfLines={1}
           >
@@ -274,12 +298,12 @@ const SidebarItem = memo(({
           !isSmall && (
             <Text
               style={{
-                fontSize: 9,
-                color: isActive ? '#FFFFFF' : isFocused ? '#A1A1AA' : '#52525B',
-                fontWeight: '800',
+                fontSize: 10,
+                color: isFocused ? '#000000' : (isActive ? '#FFFFFF' : '#71717A'),
+                fontWeight: '900',
                 textTransform: 'uppercase',
-                letterSpacing: 0.8,
-                marginTop: 5,
+                letterSpacing: 1.2,
+                marginTop: 6,
               }}
               numberOfLines={1}
             >

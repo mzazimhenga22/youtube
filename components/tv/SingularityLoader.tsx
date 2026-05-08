@@ -1,31 +1,29 @@
-import React, { useState, useEffect, useMemo, memo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Dimensions, Platform, Image } from 'react-native';
-import Animated, { 
-  useAnimatedStyle, 
-  useSharedValue, 
-  withTiming, 
-  withRepeat, 
-  withSequence, 
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  withRepeat,
+  withSequence,
   Easing,
   interpolate,
-  Extrapolate
+  type SharedValue
 } from 'react-native-reanimated';
-import { Svg, Circle, Defs, LinearGradient, Stop, G, Rect } from 'react-native-svg';
-import { Monitor, Activity, ShieldCheck, Cpu, Zap, Play } from 'lucide-react-native';
+import { Svg, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
+import { Monitor, Activity, Play } from 'lucide-react-native';
 import { LinearGradient as ExpoLinearGradient } from 'expo-linear-gradient';
 import { useAppStore } from '@/lib/store';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-
 /**
- * STREAMFLOW: STREAMING ENGINE - YouTube Edition
+ * YOUTUBE: STREAMING ENGINE
  */
 
 // --- DataMist (Particle Background) ---
-const DataMist = memo(() => {
-  const particles = useMemo(() => [...Array(25)].map((_, i) => ({
+const DataMist = () => {
+  const particles = useMemo(() => [...Array(14)].map((_, i) => ({
     id: i,
     size: Math.random() * 3 + 1,
     x: Math.random() * SCREEN_WIDTH,
@@ -41,7 +39,7 @@ const DataMist = memo(() => {
       ))}
     </View>
   );
-});
+};
 
 const Particle = ({ size, x, y, duration, delay }: any) => {
   const translateY = useSharedValue(0);
@@ -64,7 +62,7 @@ const Particle = ({ size, x, y, duration, delay }: any) => {
       -1,
       true
     );
-  }, []);
+  }, [duration]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
@@ -72,7 +70,7 @@ const Particle = ({ size, x, y, duration, delay }: any) => {
   }));
 
   return (
-    <Animated.View 
+    <Animated.View
       style={[
         {
           position: 'absolute',
@@ -84,7 +82,7 @@ const Particle = ({ size, x, y, duration, delay }: any) => {
           borderRadius: size / 2,
         },
         animatedStyle
-      ]} 
+      ]}
     />
   );
 };
@@ -92,16 +90,14 @@ const Particle = ({ size, x, y, duration, delay }: any) => {
 // --- SingularityEngine ---
 const SingularityEngine = () => {
   const rotation = useSharedValue(0);
-  const dashOffset = useSharedValue(0);
   const satelliteRotation = useSharedValue(0);
   const corePulse = useSharedValue(1);
 
   useEffect(() => {
-    rotation.value = withRepeat(withTiming(360, { duration: 3000, easing: Easing.linear }), -1, false);
-    dashOffset.value = withRepeat(withTiming(360, { duration: 6000, easing: Easing.linear }), -1, false);
-    satelliteRotation.value = withRepeat(withTiming(360, { duration: 10000, easing: Easing.linear }), -1, false);
+    rotation.value = withRepeat(withTiming(360, { duration: 3600, easing: Easing.linear }), -1, false);
+    satelliteRotation.value = withRepeat(withTiming(360, { duration: 12000, easing: Easing.linear }), -1, false);
     corePulse.value = withRepeat(
-      withSequence(withTiming(1.1, { duration: 1000 }), withTiming(1, { duration: 1000 })),
+      withSequence(withTiming(1.08, { duration: 1200 }), withTiming(1, { duration: 1200 })),
       -1,
       true
     );
@@ -124,7 +120,7 @@ const SingularityEngine = () => {
     <View style={styles.engineContainer}>
       {/* Deep Space Ring */}
       <View style={styles.deepSpaceRing} />
-      
+
       {/* Outer Data Ring (Dashed) */}
       <Animated.View style={[styles.dashedRing, { transform: [{ rotate: '-180deg' }] }]}>
          <View style={[StyleSheet.absoluteFill, { borderRadius: 160, borderStyle: 'dashed', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)' }]} />
@@ -144,7 +140,7 @@ const SingularityEngine = () => {
               <Stop offset="100%" stopColor="#ffffff" />
             </LinearGradient>
           </Defs>
-          
+
           <Circle
             cx="50" cy="50" r="42"
             fill="transparent" stroke="#ef4444" strokeWidth="0.5"
@@ -168,9 +164,9 @@ const SingularityEngine = () => {
         <Animated.Text style={[styles.coreText, coreStyle]}>
           STREAMING
         </Animated.Text>
-        <ExpoLinearGradient 
-          colors={['#ef4444', '#ef4444', 'transparent']} 
-          style={styles.coreLine} 
+        <ExpoLinearGradient
+          colors={['#ef4444', '#ef4444', 'transparent']}
+          style={styles.coreLine}
         />
         <Text style={styles.coreStatus}>Status: Buffering</Text>
       </View>
@@ -179,15 +175,7 @@ const SingularityEngine = () => {
 };
 
 export function SingularityLoader({ transparent = false, minimal = false }: { transparent?: boolean, minimal?: boolean }) {
-  const [bootProgress, setBootProgress] = useState(0);
-  const { ambientThumbnail } = useAppStore();
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setBootProgress(prev => (prev >= 100 ? 0 : prev + 1));
-    }, 120);
-    return () => clearInterval(interval);
-  }, []);
+  const ambientThumbnail = useAppStore((state) => state.ambientThumbnail);
 
   return (
     <View style={[styles.container, transparent && { backgroundColor: 'transparent' }]}>
@@ -195,10 +183,10 @@ export function SingularityLoader({ transparent = false, minimal = false }: { tr
       {transparent ? (
         <View style={StyleSheet.absoluteFill}>
            {ambientThumbnail && (
-             <Image 
-               source={{ uri: ambientThumbnail }} 
-               style={StyleSheet.absoluteFill} 
-               blurRadius={60} 
+             <Image
+               source={{ uri: ambientThumbnail }}
+               style={StyleSheet.absoluteFill}
+               blurRadius={60}
                className="opacity-30"
              />
            )}
@@ -206,89 +194,26 @@ export function SingularityLoader({ transparent = false, minimal = false }: { tr
       ) : (
         <DataMist />
       )}
-      
+
       {/* Scanline Effect Overlay */}
       <View style={styles.scanlineOverlay} pointerEvents="none" />
 
       {/* Header - Hidden in minimal mode */}
-      {!minimal && (
-        <View style={styles.header}>
-          <View style={styles.logoGroup}>
-            <View style={styles.logoIcon}>
-              <Play size={24} color="white" fill="white" />
-            </View>
-            <View>
-              <Text style={styles.logoText}>
-                STREAM<Text style={{ color: '#ef4444' }}>FLOW</Text>
-              </Text>
-              <Text style={styles.logoSub}>Video Engine v4.0.2</Text>
-            </View>
-          </View>
-
-          <View style={styles.headerStats}>
-              <View style={styles.statItem}>
-                  <View style={styles.statHeader}>
-                    <Monitor size={10} color="#475569" />
-                    <Text style={styles.statHeaderText}>Streaming Hub</Text>
-                  </View>
-                  <Text style={styles.statValue}>YT-CORE-NODE-01</Text>
-              </View>
-              <View style={styles.statItem}>
-                  <View style={styles.statHeader}>
-                    <Activity size={10} color="#475569" />
-                    <Text style={styles.statHeaderText}>Codec</Text>
-                  </View>
-                  <Text style={styles.statValue}>VP9 / AV1 4K</Text>
-              </View>
-          </View>
-        </View>
-      )}
+      {!minimal && <LoaderHeader />}
 
       {/* Main Cinematic Viewport */}
       <View style={styles.viewportContainer}>
         <View style={styles.viewport}>
-          
+
           {/* Corner Decals */}
-          <View style={styles.decalTopLeft}>
-            <Text style={styles.decalText}>
-              // Streaming Metrics{'\n'}
-              // Bitrate: 24.5 Mbps{'\n'}
-              // Buffer: 4K Stable
-            </Text>
-          </View>
-          <View style={styles.decalTopRight}>
-            <Text style={[styles.decalText, { textAlign: 'right' }]}>
-              Playback: Ready{'\n'}
-              Priority: Ultra-High{'\n'}
-              Network: Optimized
-            </Text>
-          </View>
+          {!minimal && <ViewportDecals />}
 
           {/* Centered Singularity */}
           <View style={styles.centerContent}>
             <SingularityEngine />
-
-            {/* Boot Status Footer */}
-            <View style={styles.bootContainer}>
-              <View style={styles.pulseBars}>
-                {[...Array(8)].map((_, i) => (
-                  <PulseBar key={i} index={i} />
-                ))}
-              </View>
-              
-              <View style={styles.bootStatusBox}>
-                 <View style={styles.bootPill}>
-                    <Text style={styles.bootText}>
-                      Optimizing Video Stream ... {bootProgress}%
-                    </Text>
-                 </View>
-                 <Text style={styles.bootSubText}>
-                   Fetching High-Resolution Recommendations
-                 </Text>
-              </View>
-            </View>
+            <BootStatus />
           </View>
-          
+
           {/* Ambient Vignette */}
           <ExpoLinearGradient
             colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.8)']}
@@ -299,35 +224,131 @@ export function SingularityLoader({ transparent = false, minimal = false }: { tr
       </View>
 
       {/* Global Footer */}
-      <View style={styles.footer}>
-        <View style={styles.footerLinks}>
-          <Text style={styles.footerLink}>Protocol: HLS</Text>
-          <Text style={styles.footerLink}>Stream: 4K HDR</Text>
+      {!minimal && <LoaderFooter />}
+    </View>
+  );
+}
+
+function LoaderHeader() {
+  return (
+  <View style={styles.header}>
+    <View style={styles.logoGroup}>
+      <View style={styles.logoIcon}>
+        <Play size={24} color="white" fill="white" />
+      </View>
+      <View>
+        <Text style={styles.logoText}>
+          STREAM<Text style={{ color: '#ef4444' }}>FLOW</Text>
+        </Text>
+        <Text style={styles.logoSub}>Video Engine v4.0.2</Text>
+      </View>
+    </View>
+
+    <View style={styles.headerStats}>
+        <View style={styles.statItem}>
+            <View style={styles.statHeader}>
+              <Monitor size={10} color="#475569" />
+              <Text style={styles.statHeaderText}>Streaming Hub</Text>
+            </View>
+            <Text style={styles.statValue}>YT-CORE-NODE-01</Text>
         </View>
-        <View style={styles.footerStatus}>
-            <Activity size={12} color="#450a0a" />
-            <Text style={styles.footerStatusText}>Video Pipeline Ready</Text>
+        <View style={styles.statItem}>
+            <View style={styles.statHeader}>
+              <Activity size={10} color="#475569" />
+              <Text style={styles.statHeaderText}>Codec</Text>
+            </View>
+            <Text style={styles.statValue}>VP9 / AV1 4K</Text>
         </View>
+    </View>
+  </View>
+  );
+}
+
+function ViewportDecals() {
+  return (
+  <>
+    <View style={styles.decalTopLeft}>
+      <Text style={styles.decalText}>
+        // Streaming Metrics{'\n'}
+        // Bitrate: 24.5 Mbps{'\n'}
+        // Buffer: 4K Stable
+      </Text>
+    </View>
+    <View style={styles.decalTopRight}>
+      <Text style={[styles.decalText, { textAlign: 'right' }]}>
+        Playback: Ready{'\n'}
+        Priority: Ultra-High{'\n'}
+        Network: Optimized
+      </Text>
+    </View>
+  </>
+  );
+}
+
+function BootStatus() {
+  const [bootProgress, setBootProgress] = useState(0);
+  const pulseProgress = useSharedValue(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setBootProgress(prev => (prev >= 100 ? 0 : prev + 4));
+    }, 480);
+
+    pulseProgress.value = withRepeat(
+      withTiming(1, { duration: 1600, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true
+    );
+
+    return () => clearInterval(interval);
+  }, [pulseProgress]);
+
+  return (
+    <View style={styles.bootContainer}>
+      <View style={styles.pulseBars}>
+        {PULSE_BAR_INDICES.map((index) => (
+          <PulseBar key={index} index={index} progress={pulseProgress} />
+        ))}
+      </View>
+
+      <View style={styles.bootStatusBox}>
+         <View style={styles.bootPill}>
+            <Text style={styles.bootText}>
+              Optimizing Video Stream ... {bootProgress}%
+            </Text>
+         </View>
+         <Text style={styles.bootSubText}>
+           Fetching High-Resolution Recommendations
+         </Text>
       </View>
     </View>
   );
 }
 
-const PulseBar = ({ index }: { index: number }) => {
-  const opacity = useSharedValue(0.1);
-  useEffect(() => {
-    opacity.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 500, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0.1, { duration: 500, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      true
-    );
-  }, []);
-  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
+function LoaderFooter() {
+  return (
+  <View style={styles.footer}>
+    <View style={styles.footerLinks}>
+      <Text style={styles.footerLink}>Protocol: HLS</Text>
+      <Text style={styles.footerLink}>Stream: 4K HDR</Text>
+    </View>
+    <View style={styles.footerStatus}>
+        <Activity size={12} color="#450a0a" />
+        <Text style={styles.footerStatusText}>Video Pipeline Ready</Text>
+    </View>
+  </View>
+  );
+}
+
+const PULSE_BAR_INDICES = [0, 1, 2, 3, 4, 5, 6, 7];
+
+function PulseBar({ index, progress }: { index: number; progress: SharedValue<number> }) {
+  const style = useAnimatedStyle(() => {
+    const phase = Math.abs(progress.value - index / (PULSE_BAR_INDICES.length - 1));
+    return { opacity: interpolate(phase, [0, 0.35, 1], [1, 0.35, 0.1]) };
+  });
   return <Animated.View style={[styles.pulseBar, style]} />;
-};
+}
 
 const styles = StyleSheet.create({
   container: {

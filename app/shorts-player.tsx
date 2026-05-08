@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect, memo, useCallback } from 'react';
-import { View, Text, Image, StyleSheet, Dimensions, FlatList, ViewToken, ActivityIndicator, useWindowDimensions, ScrollView } from 'react-native';
+import React, { useState, useRef, useEffect, memo, useCallback, useMemo } from 'react';
+import { View, Text, Image, StyleSheet, Dimensions, FlatList, ViewToken, ActivityIndicator, useWindowDimensions, ScrollView, Pressable } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import { VideoView, useVideoPlayer, type VideoSource } from 'expo-video';
 import { FocusablePressable } from '@/components/tv/FocusablePressable';
 import { ThumbsUp, ThumbsDown, MessageSquare, Share2, MoreVertical, Play, User, X } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,10 +12,31 @@ import { ShortsPulseLoader } from '@/components/tv/ShortsPulseLoader';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+type ShortStream = {
+  url: string;
+  mimeType?: string;
+};
+
+function toVideoSource(stream: ShortStream | null): VideoSource {
+  if (!stream?.url) return null;
+
+  const contentType = stream.mimeType?.includes('mpegURL')
+    ? 'hls'
+    : stream.mimeType?.includes('dash')
+      ? 'dash'
+      : 'auto';
+
+  return {
+    uri: stream.url,
+    contentType,
+  };
+}
+
 export default function ShortsPlayerScreen() {
   const params = useLocalSearchParams<{
     id?: string;
     url?: string;
+    mimeType?: string;
     title?: string;
     channel?: string;
     views?: string;
@@ -23,46 +44,49 @@ export default function ShortsPlayerScreen() {
     duration?: string;
   }>();
   const router = useRouter();
-  const [shorts, setShorts] = useState<Video[]>([]);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [prefetchedStreams, setPrefetchedStreams] = useState<Record<string, string>>({});
-  
-  // Drawer state
-  const [isCommentsOpen, setIsCommentsOpen] = useState(false);
-  const drawerAnim = useSharedValue(400); // 400 means off-screen (since width is 400 and right is 0)
 
-  const initialShort: Video | null = params.id ? {
+  const initialShort = useMemo<Video | null>(() => params.id ? ({
     id: params.id,
     title: params.title || 'Short',
     channel: params.channel || 'YouTube',
     views: params.views || '0',
     thumbnail: params.thumbnail || '',
     duration: params.duration || '0:00',
-  } : null;
+  }) : null, [params.id, params.title, params.channel, params.views, params.thumbnail, params.duration]);
+
+  const [shorts, setShorts] = useState<Video[]>(initialShort ? [initialShort] : []);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [prefetchedStreams, setPrefetchedStreams] = useState<Record<string, ShortStream>>(() => {
+    if (params.id && params.url) return { [params.id]: { url: params.url, mimeType: params.mimeType } };
+    return {};
+  });
+  
+  // Drawer state
+  const [isCommentsOpen, setIsCommentsOpen] = useState(false);
+  const drawerAnim = useSharedValue(400); 
 
   useEffect(() => {
     async function loadMore() {
       try {
         const data = await youtubeService.search("shorts");
-        const merged = initialShort
-          ? [initialShort, ...data.filter(video => video.id !== initialShort.id)]
-          : data;
-        setShorts(merged.length > 0 ? merged : buildFallbackShorts());
-        if (params.url && initialShort) {
-          setPrefetchedStreams(prev => ({ ...prev, [initialShort.id]: params.url as string }));
-        }
+        setShorts(prev => {
+          const merged = initialShort
+            ? [initialShort, ...data.filter(video => video.id !== initialShort.id)]
+            : data;
+          return merged.length > 0 ? merged : buildFallbackShorts();
+        });
       } catch (e) { console.error(e); }
     }
     loadMore();
-  }, [params.id]);
+  }, [initialShort]);
 
   useEffect(() => {
     const activeVideo = shorts[activeIndex];
     if (!activeVideo || prefetchedStreams[activeVideo.id]) return;
     youtubeService.getStream(activeVideo.id).then(stream => {
-      if (stream?.url) setPrefetchedStreams(prev => ({ ...prev, [activeVideo.id]: stream.url }));
+      if (stream?.url) setPrefetchedStreams(prev => ({ ...prev, [activeVideo.id]: stream }));
     }).catch(e => console.error(e));
-  }, [activeIndex, shorts]);
+  }, [activeIndex, shorts, prefetchedStreams]);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems.length > 0) setActiveIndex(viewableItems[0].index ?? 0);
@@ -82,21 +106,14 @@ export default function ShortsPlayerScreen() {
 
   const flatListRef = useRef<FlatList>(null);
 
-  const playNext = useCallback(() => {
-    if (activeIndex < shorts.length - 1) {
-      flatListRef.current?.scrollToIndex({ index: activeIndex + 1, animated: true });
-    }
-  }, [activeIndex, shorts.length]);
-
   const renderItem = useCallback(({ item, index }: { item: Video, index: number }) => (
     <ShortPage 
       video={item} 
       isActive={index === activeIndex} 
-      streamUrl={prefetchedStreams[item.id] || null}
+      stream={prefetchedStreams[item.id] || null}
       onOpenComments={toggleComments}
-      onPlayNext={playNext}
     />
-  ), [activeIndex, prefetchedStreams, toggleComments, playNext]);
+  ), [activeIndex, prefetchedStreams, toggleComments]);
 
   return (
     <View style={StyleSheet.absoluteFill} className="bg-black">
@@ -113,7 +130,7 @@ export default function ShortsPlayerScreen() {
         windowSize={3}
         initialNumToRender={1}
         maxToRenderPerBatch={1}
-        removeClippedSubviews={true}
+        removeClippedSubviews={false}
         style={{ height: SCREEN_HEIGHT }}
         onScrollToIndexFailed={(info) => {
            flatListRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
@@ -144,28 +161,62 @@ export default function ShortsPlayerScreen() {
   );
 }
 
-const ShortPage = memo(({ video, isActive, streamUrl, onOpenComments, onPlayNext }: { 
-  video: Video, isActive: boolean, streamUrl: string | null, onOpenComments: () => void, onPlayNext: () => void
+const ShortPage = memo(({ video, isActive, stream: initialStream, onOpenComments }: { 
+  video: Video, isActive: boolean, stream: ShortStream | null, onOpenComments: () => void
 }) => {
   const { width, height } = useWindowDimensions();
-  const isPhone = width < 768;
   const [videoAspect, setVideoAspect] = useState(9/16);
-  
-  const player = useVideoPlayer(streamUrl || '', (p) => {
-    p.loop = false; // We handle autoplay ourselves for 'infinite' feel
-    if (isActive) p.play();
+  const activeSourceRef = useRef<string | null>(null);
+  const [localStream, setLocalStream] = useState<ShortStream | null>(initialStream);
+  const [isStreamLoading, setIsStreamLoading] = useState(true);
+  const [isCardFocused, setIsCardFocused] = useState(false);
+
+  const player = useVideoPlayer(null, (p) => {
+    p.loop = true; 
+    p.timeUpdateEventInterval = 0.5;
   });
 
-  // Autoplay next logic
+  // Sync with prop and fetch if needed
   useEffect(() => {
-    const subscription = player.addListener('statusChange', (event) => {
-      if (event.status === 'idle' && isActive) {
-        // Video ended, navigate to next
-        onPlayNext?.();
+    if (initialStream) {
+      setLocalStream(initialStream);
+    } else if (isActive && video.id !== 'fallback') {
+      youtubeService.getStream(video.id).then(s => {
+        if (s?.url) setLocalStream(s);
+      });
+    }
+  }, [initialStream, isActive, video.id]);
+
+  useEffect(() => {
+    setIsStreamLoading(!localStream?.url);
+  }, [localStream]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function replaceSource() {
+      if (activeSourceRef.current === localStream?.url) return;
+      activeSourceRef.current = localStream?.url || null;
+
+      if (!localStream?.url) {
+        player.pause();
+        await player.replaceAsync(null);
+        return;
       }
-    });
-    return () => subscription.remove();
-  }, [player, isActive, onPlayNext]);
+
+      try {
+        await player.replaceAsync(toVideoSource(localStream));
+        if (!cancelled && isActive) {
+          player.play();
+        }
+      } catch (err) {
+        console.warn('[ShortsPlayer] replaceAsync failed:', err);
+      }
+    }
+
+    replaceSource();
+    return () => { cancelled = true; };
+  }, [player, localStream, isActive]);
 
   useEffect(() => {
     const status = player.status as any;
@@ -189,14 +240,14 @@ const ShortPage = memo(({ video, isActive, streamUrl, onOpenComments, onPlayNext
   const [isPlaying, setIsPlaying] = useState(true);
 
   useEffect(() => {
-    if (isActive) {
+    if (isActive && localStream?.url) {
       player.play();
       setIsPlaying(true);
     } else {
       player.pause();
       setIsPlaying(false);
     }
-  }, [isActive, player]);
+  }, [isActive, player, localStream]);
 
   const togglePlay = useCallback(() => {
     if (player.playing) {
@@ -208,32 +259,26 @@ const ShortPage = memo(({ video, isActive, streamUrl, onOpenComments, onPlayNext
     }
   }, [player]);
 
-  const videoHeight = height * 0.85;
-  const containerWidth = videoHeight * videoAspect;
-
-  // Local loading state to ensure the loader has time to be seen
-  const [isStreamLoading, setIsStreamLoading] = useState(true);
-
-  useEffect(() => {
-    if (streamUrl) {
-      setIsStreamLoading(false);
-    } else {
-      setIsStreamLoading(true);
-    }
-  }, [streamUrl]);
+  const isTvLayout = width >= 900;
+  const videoHeight = height * (isTvLayout ? 0.88 : 0.85);
+  const containerWidth = videoHeight * videoAspect * (isTvLayout ? 1.16 : 1);
 
   return (
     <View style={{ height: SCREEN_HEIGHT, width: SCREEN_WIDTH }} className="items-center justify-center">
       {/* ── AMBIENT CANVAS ── */}
       <View style={StyleSheet.absoluteFill}>
-        <Image source={{ uri: video.thumbnail }} style={StyleSheet.absoluteFill} blurRadius={100} className="opacity-40" />
-        <LinearGradient colors={['rgba(0,0,0,0.4)', 'rgba(0,0,0,0.8)']} style={StyleSheet.absoluteFill} />
+        <LinearGradient
+          colors={['#050505', '#111113', '#000000']}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.ambientOrbPrimary} />
+        <View style={styles.ambientOrbSecondary} />
       </View>
 
       <View className="flex-row items-center justify-center">
         {/* ── FLOATING VERTICAL PLAYER ── */}
         <Animated.View 
-          entering={FadeIn.duration(1000)}
+          entering={FadeIn.duration(600)}
           className="bg-zinc-950 overflow-hidden border-[1px] border-white/10 shadow-2xl"
           style={{ 
             height: videoHeight, 
@@ -246,23 +291,34 @@ const ShortPage = memo(({ video, isActive, streamUrl, onOpenComments, onPlayNext
             elevation: 40,
           }} 
         >
+          {/* Main video card — FocusablePressable for proper TV D-pad support */}
           <FocusablePressable
             onPress={togglePlay}
-            className="flex-1"
-            focusedClassName=""
+            onFocus={() => setIsCardFocused(true)}
+            onBlur={() => setIsCardFocused(false)}
+            style={StyleSheet.absoluteFill}
             activeScale={1}
+            hasTVPreferredFocus={isActive}
+            focusedClassName=""
           >
             {({ isFocused }) => (
               <>
-                {!isStreamLoading && streamUrl ? (
-                  <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
+                {!isStreamLoading && localStream?.url ? (
+                  <VideoView
+                    player={player}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                    nativeControls={false}
+                    surfaceType="textureView"
+                    useExoShutter={false}
+                  />
                 ) : (
                   <ShortsPulseLoader thumbnail={video.thumbnail} />
                 )}
 
-                {/* Focus indicator & Play/Pause Overlay */}
-                {isFocused && (
-                  <View style={StyleSheet.absoluteFill} className="items-center justify-center bg-white/5">
+                {/* Focus ring + Play/Pause Overlay */}
+                {(isCardFocused || isFocused) && (
+                  <View style={[StyleSheet.absoluteFill, { borderWidth: 3, borderColor: 'rgba(255,255,255,0.3)', borderRadius: 48 }]} className="items-center justify-center">
                     {!isPlaying && (
                       <Animated.View entering={FadeIn.duration(200)} className="bg-white/90 p-6 rounded-full shadow-2xl">
                         <Play size={48} color="black" fill="black" />
@@ -272,7 +328,7 @@ const ShortPage = memo(({ video, isActive, streamUrl, onOpenComments, onPlayNext
                 )}
 
                 {/* Info Overlay (Bottom) */}
-                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.85)']} className="absolute inset-x-0 bottom-0 p-8">
+                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.85)']} className="absolute inset-x-0 bottom-0 p-8" pointerEvents="none">
                   <View className="flex-row items-center mb-4">
                     <View className="w-12 h-12 rounded-full bg-zinc-800 mr-3 border-2 border-white/20 overflow-hidden shadow-lg">
                       <Image source={{ uri: video.thumbnail }} className="w-full h-full" />
@@ -283,15 +339,12 @@ const ShortPage = memo(({ video, isActive, streamUrl, onOpenComments, onPlayNext
                       </Text>
                       <Text className="text-zinc-400 text-xs font-bold uppercase tracking-widest">{video.views} Views</Text>
                     </View>
-                    <FocusablePressable className="bg-red-600 px-6 py-2 rounded-full ml-4" focusedClassName="bg-white">
-                       {({ isFocused: btnFocused }) => <Text className={`font-black text-xs ${btnFocused ? 'text-black' : 'text-white'}`}>FOLLOW</Text>}
-                    </FocusablePressable>
                   </View>
                   <Text className="text-white text-2xl font-black leading-tight tracking-tighter" numberOfLines={2}>{video.title}</Text>
                 </LinearGradient>
 
                 {/* Progress Pill */}
-                <View className="absolute bottom-0 inset-x-0 h-1.5 px-8 pb-4">
+                <View className="absolute bottom-0 inset-x-0 h-1.5 px-8 pb-4" pointerEvents="none">
                   <View className="flex-1 bg-white/20 rounded-full overflow-hidden">
                     <View 
                       className="h-full bg-white" 
@@ -305,7 +358,7 @@ const ShortPage = memo(({ video, isActive, streamUrl, onOpenComments, onPlayNext
         </Animated.View>
 
         {/* ── MINIMALIST ACTION DOCK ── */}
-        <View className="ml-16 space-y-12 items-center">
+        <View className="ml-16 items-center" style={{ gap: 16 }}>
           <ShortsPlayerAction icon={ThumbsUp} label="Like" color="#00E5FF" />
           <ShortsPlayerAction icon={ThumbsDown} label="Dislike" color="#FF3D00" />
           <ShortsPlayerAction icon={MessageSquare} label="Talk" onPress={onOpenComments} color="#FFD600" />
@@ -345,22 +398,34 @@ function CommentsPanel({ videoId, onClose }: { videoId: string, onClose: () => v
       {loading ? (
         <ActivityIndicator color="#FF0000" size="large" className="mt-20" />
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false}>
-          {comments?.map((comment, i) => (
-            <View key={i} className="flex-row mb-6">
-              <View className="w-10 h-10 rounded-full bg-zinc-800 mr-3 overflow-hidden">
-                <Image source={{ uri: comment.avatar }} className="w-full h-full" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-zinc-400 font-bold text-sm mb-1">{comment.user}</Text>
-                <Text className="text-white text-base leading-snug">{comment.text}</Text>
-              </View>
-            </View>
-          ))}
-          {comments?.length === 0 && (
-            <Text className="text-zinc-500 text-center mt-20 font-bold">No comments yet</Text>
+        <FlatList
+          data={comments}
+          keyExtractor={(_, i) => `comment-${i}`}
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews={false}
+          renderItem={({ item: comment }) => (
+            <FocusablePressable
+              className="flex-row mb-4 p-3 rounded-2xl"
+              focusedClassName="bg-white/10 scale-[1.01]"
+              activeScale={1}
+            >
+              {() => (
+                <>
+                  <View className="w-10 h-10 rounded-full bg-zinc-800 mr-3 overflow-hidden">
+                    <Image source={{ uri: comment.avatar }} className="w-full h-full" />
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-zinc-400 font-bold text-sm mb-1">{comment.user}</Text>
+                    <Text className="text-white text-base leading-snug">{comment.text}</Text>
+                  </View>
+                </>
+              )}
+            </FocusablePressable>
           )}
-        </ScrollView>
+          ListEmptyComponent={
+            <Text className="text-zinc-500 text-center mt-20 font-bold">No comments yet</Text>
+          }
+        />
       )}
     </View>
   );
@@ -393,6 +458,24 @@ function buildFallbackShorts(): Video[] {
 }
 
 const styles = StyleSheet.create({
+  ambientOrbPrimary: {
+    position: 'absolute',
+    width: 520,
+    height: 520,
+    borderRadius: 260,
+    top: -120,
+    left: -120,
+    backgroundColor: 'rgba(255, 0, 72, 0.14)',
+  },
+  ambientOrbSecondary: {
+    position: 'absolute',
+    width: 620,
+    height: 620,
+    borderRadius: 310,
+    right: -180,
+    bottom: -160,
+    backgroundColor: 'rgba(0, 229, 255, 0.10)',
+  },
   drawer: {
     position: 'absolute',
     top: 0,

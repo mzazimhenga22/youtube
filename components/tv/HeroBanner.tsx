@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
-import { View, Text, StyleSheet, Dimensions, Image } from 'react-native';
+import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { FocusablePressable } from './FocusablePressable';
 import { Play, Plus, ChevronLeft, ChevronRight, Info } from 'lucide-react-native';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { Video } from '@/lib/youtube';
-import { router } from 'expo-router';
+import { playVideo } from '@/lib/navigation';
+import { useAppStore } from '@/lib/store';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const getHDThumbnail = (id: string) => `https://img.youtube.com/vi/${id}/maxresdefault.jpg`;
@@ -21,9 +23,26 @@ interface HeroBannerProps {
 export const HeroBanner = memo(function HeroBanner({ title, description, thumbnail, videos }: HeroBannerProps) {
   const heroVideos = videos && videos.length > 0 ? videos.slice(0, 5) : [{ id: '0', title, channel: description.split(' • ')[0] || '', views: '', thumbnail, duration: '' }];
   const [activeIndex, setActiveIndex] = useState(0);
+  const { setAmbientState } = useAppStore();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Track if any button in the banner is focused
+  const [isFocused, setIsFocused] = useState(false);
+  const contentOpacity = useSharedValue(0.7);
+  const contentScale = useSharedValue(0.98);
 
   const currentVideo = heroVideos[activeIndex] || heroVideos[0];
+
+  // Prefetch hero images to avoid decode stalls on rotation/focus.
+  useEffect(() => {
+    const urls = heroVideos
+      .map(v => v.thumbnail || getHDThumbnail(v.id))
+      .filter(Boolean)
+      .slice(0, 5);
+    if (urls.length > 0) {
+      void Image.prefetch(urls).catch(() => undefined);
+    }
+  }, [heroVideos]);
 
   // Auto-rotate
   useEffect(() => {
@@ -33,6 +52,23 @@ export const HeroBanner = memo(function HeroBanner({ title, description, thumbna
     }, ROTATION_INTERVAL);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [heroVideos.length]);
+
+  // Sync ambient state when banner is focused or video changes
+  useEffect(() => {
+    if (isFocused && currentVideo) {
+      setAmbientState(currentVideo.thumbnail, '#FFFFFF');
+    }
+  }, [isFocused, currentVideo, setAmbientState]);
+
+  useEffect(() => {
+    contentOpacity.value = withTiming(isFocused ? 1 : 0.75, { duration: 300 });
+    contentScale.value = withTiming(isFocused ? 1 : 0.98, { duration: 300 });
+  }, [isFocused]);
+
+  const animatedContentStyle = useAnimatedStyle(() => ({
+    opacity: contentOpacity.value,
+    transform: [{ scale: contentScale.value }]
+  }));
 
   const goTo = useCallback((dir: -1 | 1) => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -44,17 +80,7 @@ export const HeroBanner = memo(function HeroBanner({ title, description, thumbna
   }, [heroVideos.length]);
 
   const handlePlay = useCallback(() => {
-    router.push({
-      pathname: '/modal',
-      params: {
-        id: currentVideo.id,
-        title: currentVideo.title,
-        channel: currentVideo.channel,
-        views: currentVideo.views,
-        thumbnail: currentVideo.thumbnail,
-        duration: currentVideo.duration,
-      },
-    });
+    playVideo(currentVideo);
   }, [currentVideo]);
 
   // Split title into max 2 lines for cinematic display
@@ -67,32 +93,36 @@ export const HeroBanner = memo(function HeroBanner({ title, description, thumbna
     <View style={{ 
       height: 720, 
       width: '100%', 
-      borderRadius: 32, 
+      borderRadius: 40, 
       overflow: 'hidden', 
-      marginBottom: 20, 
+      marginBottom: 32, 
       marginTop: 10,
-      backgroundColor: '#111',
+      backgroundColor: '#000',
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 10 },
-      shadowOpacity: 0.5,
-      shadowRadius: 20,
-      elevation: 10,
+      shadowOffset: { width: 0, height: 20 },
+      shadowOpacity: 0.6,
+      shadowRadius: 30,
+      elevation: 15,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.05)'
     }}>
-      {/* Background Image with crossfade */}
-      <Animated.View key={`hero-${activeIndex}`} entering={FadeIn.duration(800)} style={StyleSheet.absoluteFill}>
+      {/* Background Image with crossfade - let expo-image handle the transition */}
+      <View style={StyleSheet.absoluteFill}>
         <Image
           source={{ uri: currentVideo.thumbnail || getHDThumbnail(currentVideo.id) }}
           style={StyleSheet.absoluteFill}
-          resizeMode="cover"
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={1000}
         />
-      </Animated.View>
+      </View>
 
-      {/* ── Clean overlays — NO full-screen darkening ── */}
+      {/* ── Overlays ── */}
       
-      {/* 1. Left side gradient ONLY — for text legibility */}
+      {/* 1. Left side gradient for text legibility */}
       <LinearGradient
-        colors={['rgba(0,0,0,0.9)', 'rgba(0,0,0,0.4)', 'transparent']}
-        locations={[0, 0.4, 0.7]}
+        colors={['rgba(0,0,0,0.85)', 'rgba(0,0,0,0.4)', 'transparent']}
+        locations={[0, 0.45, 0.8]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={StyleSheet.absoluteFill}
@@ -102,94 +132,110 @@ export const HeroBanner = memo(function HeroBanner({ title, description, thumbna
       <LinearGradient
         colors={[
           'transparent',
-          'rgba(10,10,10,0.2)',
-          'rgba(10,10,10,0.8)',
+          'rgba(10,10,10,0.3)',
+          'rgba(10,10,10,0.9)',
           '#0A0A0A',
         ]}
-        locations={[0, 0.6, 0.85, 1]}
+        locations={[0, 0.5, 0.85, 1]}
         style={StyleSheet.absoluteFill}
       />
 
       {/* Content */}
-      <View style={{ flex: 1, justifyContent: 'center', paddingLeft: 60, paddingRight: 60 }}>
-        <Animated.View key={`content-${activeIndex}`} entering={FadeInDown.duration(600)}>
-          {/* Category Tag */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20, gap: 12 }}>
-            <View style={{ backgroundColor: '#FF0000', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 }}>
-              <Text style={{ color: 'white', fontSize: 13, fontWeight: '900', letterSpacing: 2.5, textTransform: 'uppercase' }}>
-                {activeIndex === 0 ? 'TRENDING' : `#${activeIndex + 1} TRENDING`}
-              </Text>
+      <View style={{ flex: 1, justifyContent: 'center', paddingLeft: 80, paddingRight: 80 }}>
+        <Animated.View 
+          style={animatedContentStyle}
+        >
+          <Animated.View 
+            key={currentVideo.id} 
+            entering={FadeInDown.duration(800)}
+          >
+            {/* Category Tag */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 16 }}>
+              <View style={{ backgroundColor: '#FF0000', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12 }}>
+                <Text style={{ color: 'white', fontSize: 14, fontWeight: '900', letterSpacing: 2, textTransform: 'uppercase' }}>
+                  {activeIndex === 0 ? 'FEATURED' : `#${activeIndex + 1} TRENDING`}
+                </Text>
+              </View>
+              {currentVideo.views ? (
+                <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 18, fontWeight: '700' }}>
+                  {currentVideo.views} views
+                </Text>
+              ) : null}
             </View>
-            {currentVideo.views ? (
-              <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 15, fontWeight: '700' }}>
-                {currentVideo.views} views
-              </Text>
-            ) : null}
-          </View>
 
-          {/* Title */}
-          <View style={{ marginBottom: 16, maxWidth: SCREEN_WIDTH * 0.5 }}>
-            <Text
-              style={{ color: 'white', fontSize: SCREEN_WIDTH < 768 ? 38 : 62, fontWeight: '900', lineHeight: SCREEN_WIDTH < 768 ? 42 : 68, letterSpacing: -2.5 }}
-              numberOfLines={1}
-            >
-              {line1}
-            </Text>
-            {line2 ? (
+            {/* Title */}
+            <View style={{ marginBottom: 20, maxWidth: SCREEN_WIDTH * 0.6 }}>
               <Text
-                style={{ color: 'rgba(255,255,255,0.8)', fontSize: SCREEN_WIDTH < 768 ? 34 : 54, fontWeight: '900', lineHeight: SCREEN_WIDTH < 768 ? 38 : 60, letterSpacing: -2.5 }}
+                style={{ color: 'white', fontSize: SCREEN_WIDTH < 768 ? 42 : 72, fontWeight: '900', lineHeight: SCREEN_WIDTH < 768 ? 48 : 78, letterSpacing: -3 }}
                 numberOfLines={1}
               >
-                {line2}
+                {line1}
               </Text>
-            ) : null}
-          </View>
+              {line2 ? (
+                <Text
+                  style={{ color: 'rgba(255,255,255,0.85)', fontSize: SCREEN_WIDTH < 768 ? 38 : 62, fontWeight: '900', lineHeight: SCREEN_WIDTH < 768 ? 44 : 68, letterSpacing: -3 }}
+                  numberOfLines={1}
+                >
+                  {line2}
+                </Text>
+              ) : null}
+            </View>
 
-          {/* Channel */}
-          <Text
-            style={{ color: 'rgba(255,255,255,0.6)', fontSize: 20, fontWeight: '700', marginBottom: 32, maxWidth: SCREEN_WIDTH * 0.45 }}
-            numberOfLines={1}
-          >
-            {currentVideo.channel}{currentVideo.duration ? ` • ${currentVideo.duration}` : ''}
-          </Text>
+            {/* Channel */}
+            <Text
+              style={{ color: 'rgba(255,255,255,0.6)', fontSize: 24, fontWeight: '700', marginBottom: 40, maxWidth: SCREEN_WIDTH * 0.5 }}
+              numberOfLines={1}
+            >
+              {currentVideo.channel}{currentVideo.duration ? ` • ${currentVideo.duration}` : ''}
+            </Text>
+          </Animated.View>
 
           {/* Action Buttons */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>
             <FocusablePressable
               onPress={handlePlay}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
               nativeID="hero-play"
-              style={{ backgroundColor: 'white', paddingHorizontal: 36, paddingVertical: 18, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}
+              className="bg-white"
+              style={{ paddingHorizontal: 40, paddingVertical: 22, borderRadius: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}
               focusedClassName="bg-red-600 scale-105"
               activeScale={1.08}
             >
               {({ isFocused }) => (
                 <>
-                  <Play size={24} color={isFocused ? 'white' : 'black'} fill={isFocused ? 'white' : 'black'} strokeWidth={3} />
-                  <Text style={{ color: isFocused ? 'white' : 'black', fontSize: 20, fontWeight: '900', marginLeft: 12, letterSpacing: -0.5 }}>Play Now</Text>
+                  <Play size={28} color={isFocused ? 'white' : 'black'} fill={isFocused ? 'white' : 'black'} strokeWidth={3} />
+                  <Text style={{ color: isFocused ? 'white' : 'black', fontSize: 24, fontWeight: '900', marginLeft: 16, letterSpacing: -0.5 }}>Play Now</Text>
                 </>
               )}
             </FocusablePressable>
 
             <FocusablePressable
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
               nativeID="hero-info"
-              style={{ backgroundColor: 'rgba(255,255,255,0.12)', paddingHorizontal: 28, paddingVertical: 18, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}
-              focusedClassName="bg-white/25 scale-105"
+              className="bg-white/10"
+              style={{ paddingHorizontal: 32, paddingVertical: 22, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}
+              focusedClassName="bg-white/25 scale-105 border-white"
               activeScale={1.08}
             >
               {({ isFocused }) => (
                 <>
-                  <Info size={22} color={isFocused ? 'white' : 'rgba(255,255,255,0.8)'} />
-                  <Text style={{ color: isFocused ? 'white' : 'rgba(255,255,255,0.8)', fontSize: 18, fontWeight: '800', marginLeft: 10 }}>More Info</Text>
+                  <Info size={26} color={isFocused ? 'white' : 'rgba(255,255,255,0.9)'} />
+                  <Text style={{ color: isFocused ? 'white' : 'rgba(255,255,255,0.9)', fontSize: 22, fontWeight: '800', marginLeft: 12 }}>More Info</Text>
                 </>
               )}
             </FocusablePressable>
 
             <FocusablePressable
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
               nativeID="hero-add"
-              style={{ width: 56, height: 56, backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}
-              focusedClassName="bg-white/25 scale-110"
+              className="bg-white/10"
+              style={{ width: 64, height: 64, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}
+              focusedClassName="bg-white/25 scale-110 border-white"
             >
-              <Plus size={26} color="rgba(255,255,255,0.8)" strokeWidth={3} />
+              <Plus size={32} color="white" strokeWidth={3} />
             </FocusablePressable>
           </View>
         </Animated.View>
@@ -197,39 +243,45 @@ export const HeroBanner = memo(function HeroBanner({ title, description, thumbna
 
       {/* Bottom Navigation — Dots + Arrows */}
       {heroVideos.length > 1 && (
-        <View style={{ position: 'absolute', bottom: 60, right: 60, flexDirection: 'row', alignItems: 'center', gap: 20 }}>
+        <View style={{ position: 'absolute', bottom: 60, right: 80, flexDirection: 'row', alignItems: 'center', gap: 32 }}>
           {/* Dot indicators */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             {[0, 1, 2, 3, 4].map((i) => (
               <View
                 key={i}
                 style={{
-                  width: (activeIndex % 5) === i ? 26 : 8,
-                  height: 8,
+                  width: (activeIndex % 5) === i ? 32 : 10,
+                  height: 10,
                   borderRadius: 5,
-                  backgroundColor: (activeIndex % 5) === i ? '#FF0000' : 'rgba(255,255,255,0.4)',
+                  backgroundColor: (activeIndex % 5) === i ? '#FF0000' : 'rgba(255,255,255,0.3)',
                 }}
               />
             ))}
           </View>
 
           {/* Arrow Buttons */}
-          <View style={{ flexDirection: 'row', gap: 10 }}>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
             <FocusablePressable
               onPress={() => goTo(-1)}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
               nativeID="hero-prev"
-              style={{ width: 48, height: 48, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 14, alignItems: 'center', justifyContent: 'center' }}
+              className="bg-white/10"
+              style={{ width: 60, height: 60, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}
               focusedClassName="bg-white/25 scale-110"
             >
-              <ChevronLeft size={26} color="white" />
+              <ChevronLeft size={32} color="white" />
             </FocusablePressable>
             <FocusablePressable
               onPress={() => goTo(1)}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
               nativeID="hero-next"
-              style={{ width: 48, height: 48, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 14, alignItems: 'center', justifyContent: 'center' }}
+              className="bg-white/10"
+              style={{ width: 60, height: 60, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}
               focusedClassName="bg-white/25 scale-110"
             >
-              <ChevronRight size={26} color="white" />
+              <ChevronRight size={32} color="white" />
             </FocusablePressable>
           </View>
         </View>

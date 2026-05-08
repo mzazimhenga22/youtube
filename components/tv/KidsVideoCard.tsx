@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { FocusablePressable } from './FocusablePressable';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -13,16 +14,31 @@ interface KidsVideoCardProps {
   thumbnail: string;
   duration: string;
   color?: string;
+  onPress?: () => void;
+  nextFocusUp?: number;
+  nextFocusDown?: number;
+  nextFocusLeft?: number;
+  nextFocusRight?: number;
 }
 
 export const KidsVideoCard = memo(function KidsVideoCard({ 
   title, 
   thumbnail, 
   duration,
-  color = "#3B82F6" // Default blue
+  color = "#3B82F6", // Default blue
+  onPress,
+  nextFocusUp,
+  nextFocusDown,
+  nextFocusLeft,
+  nextFocusRight
 }: KidsVideoCardProps) {
   return (
     <FocusablePressable 
+      onPress={onPress}
+      nextFocusUp={nextFocusUp}
+      nextFocusDown={nextFocusDown}
+      nextFocusLeft={nextFocusLeft}
+      nextFocusRight={nextFocusRight}
       className="w-80 mr-8 rounded-[32px] overflow-hidden"
       focusedClassName="shadow-2xl shadow-blue-500/40"
       activeScale={1.1}
@@ -39,7 +55,8 @@ export const KidsVideoCard = memo(function KidsVideoCard({
             <Image 
               source={{ uri: thumbnail }} 
               style={StyleSheet.absoluteFill}
-              resizeMode="cover"
+              contentFit="cover"
+              transition={200}
             />
             <View className="absolute bottom-3 right-3 bg-black/70 px-2 py-1 rounded-full">
               <Text className="text-white text-xs font-black">{duration}</Text>

@@ -1,5 +1,5 @@
-import React, { useMemo, memo } from 'react';
-import { View, Text, useWindowDimensions, StyleSheet, Image } from 'react-native';
+import React, { useMemo, memo, useCallback, useRef, useEffect } from 'react';
+import { View, Text, useWindowDimensions, StyleSheet, Image, findNodeHandle } from 'react-native';
 import { Tabs, usePathname } from 'expo-router';
 import { Sidebar } from '@/components/tv/Sidebar';
 import { useAppStore } from '@/lib/store';
@@ -7,28 +7,7 @@ import { FocusablePressable } from '@/components/tv/FocusablePressable';
 import { Mic, Search as SearchIcon, Music2, Clapperboard, Radio, Sparkles, User } from 'lucide-react-native';
 import { router } from 'expo-router';
 import Animated, { FadeIn } from 'react-native-reanimated';
-
-/* ═══════════════════════════════════════════════════════════
- * TV Tab Layout — Flex-based for proper remote navigation
- * 
- * Structure:
- *  ┌────────────────────────────────────────────────┐
- *  │                 SOLID HEADER                   │
- *  ├─────┬──────────────────────────────────┬───────┤
- *  │  L  │                                  │   R   │
- *  │  S  │          CONTENT (Tabs)          │   S   │
- *  │  I  │                                  │   I   │
- *  │  D  │                                  │   D   │
- *  │  E  │                                  │   E   │
- *  │  B  │                                  │   B   │
- *  │  A  │                                  │   A   │
- *  │  R  │                                  │   R   │
- *  └─────┴──────────────────────────────────┴───────┘
- *
- * D-pad Left from content → Left sidebar items
- * D-pad Right from content → Right sidebar items
- * D-pad Up from top content → Header buttons
- * ═══════════════════════════════════════════════════════════ */
+import { MiniPlayer } from '@/components/tv/MiniPlayer';
 
 export default function TabLayout() {
   const { currentProfile } = useAppStore();
@@ -48,128 +27,156 @@ export default function TabLayout() {
 
   return (
     <View style={styles.root}>
-      {/* ── SOLID HEADER BAR ── */}
+      {/* ── FLOATING HEADER PODS ── */}
       {!isKids && !isSearch && (
-        <Animated.View entering={FadeIn.duration(500)} style={styles.header}>
-          {/* Red accent line at top */}
-          <View style={styles.headerAccentLine} />
-
-          {/* Left: Branding */}
-          <View style={styles.headerLeft}>
-            <View style={styles.logoBox}>
-              <View style={styles.playTriangle} />
-            </View>
-            <Text style={styles.logoText}>YouTube</Text>
-            {screenTheme.label !== 'YouTube' && (
-              <View style={[styles.themeBadge, { backgroundColor: `${screenTheme.color}18`, borderColor: `${screenTheme.color}30` }]}>
-                <Text style={[styles.themeBadgeText, { color: screenTheme.color }]}>{screenTheme.label}</Text>
+        <>
+          {/* Left Pod: Branding */}
+          <Animated.View 
+            entering={FadeIn.duration(500).delay(100)} 
+            style={[styles.floatingPod, styles.headerLeftPod]}
+          >
+            <View style={styles.headerLeft}>
+              <View style={styles.logoBox}>
+                <View style={styles.playTriangle} />
               </View>
-            )}
-          </View>
-
-          {/* Right: Action buttons */}
-          <View style={styles.headerRight}>
-            <FocusablePressable
-              nativeID="header-search"
-              style={styles.headerBtn}
-              focusedClassName="bg-white/15 scale-110"
-              onPress={() => router.push('/search' as any)}
-            >
-              {({ isFocused }) => (
-                <SearchIcon size={18} color={isFocused ? '#FFFFFF' : '#A1A1AA'} strokeWidth={isFocused ? 2.5 : 2} />
-              )}
-            </FocusablePressable>
-
-            <FocusablePressable
-              nativeID="header-mic"
-              style={styles.headerBtn}
-              focusedClassName="bg-white/15 scale-110"
-            >
-              {({ isFocused }) => (
-                <Mic size={18} color={isFocused ? '#FFFFFF' : '#A1A1AA'} strokeWidth={isFocused ? 2.5 : 2} />
-              )}
-            </FocusablePressable>
-
-            <FocusablePressable
-              nativeID="header-avatar"
-              style={styles.avatarBtn}
-              focusedClassName="border-white scale-110"
-              onPress={() => router.push('/profile' as any)}
-            >
-              {currentProfile?.avatar ? (
-                <Image source={{ uri: currentProfile.avatar }} style={styles.avatarImg} />
-              ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <User size={16} color="#A1A1AA" />
+              <Text style={styles.logoText}>YouTube</Text>
+              {screenTheme.label !== 'YouTube' && (
+                <View style={[styles.themeBadge, { backgroundColor: `${screenTheme.color}18`, borderColor: `${screenTheme.color}30` }]}>
+                  <Text style={[styles.themeBadgeText, { color: screenTheme.color }]}>{screenTheme.label}</Text>
                 </View>
               )}
-            </FocusablePressable>
-          </View>
-        </Animated.View>
+            </View>
+          </Animated.View>
+
+          {/* Right Pod: Action buttons */}
+          <Animated.View 
+            entering={FadeIn.duration(500).delay(200)} 
+            style={[styles.floatingPod, styles.headerRightPod]}
+          >
+            <View style={styles.headerRight}>
+              <FocusablePressable
+                nativeID="header-search"
+                style={styles.headerBtn}
+                focusedClassName="bg-white/15 scale-110"
+                onPress={() => router.push('/search' as any)}
+              >
+                {({ isFocused }) => (
+                  <SearchIcon size={18} color={isFocused ? '#FFFFFF' : '#A1A1AA'} strokeWidth={isFocused ? 2.5 : 2} />
+                )}
+              </FocusablePressable>
+
+              <FocusablePressable
+                nativeID="header-mic"
+                style={styles.headerBtn}
+                focusedClassName="bg-white/15 scale-110"
+              >
+                {({ isFocused }) => (
+                  <Mic size={18} color={isFocused ? '#FFFFFF' : '#A1A1AA'} strokeWidth={isFocused ? 2.5 : 2} />
+                )}
+              </FocusablePressable>
+
+              <FocusablePressable
+                nativeID="header-avatar"
+                style={styles.avatarBtn}
+                focusedClassName="border-white scale-110"
+                onPress={() => router.push('/profile' as any)}
+              >
+                {currentProfile?.avatar ? (
+                  <Image
+                    source={typeof currentProfile.avatar === 'string' ? { uri: currentProfile.avatar } : currentProfile.avatar}
+                    style={styles.avatarImg}
+                  />
+                ) : (
+                  <View style={styles.avatarPlaceholder}>
+                    <User size={16} color="#A1A1AA" />
+                  </View>
+                )}
+              </FocusablePressable>
+            </View>
+          </Animated.View>
+        </>
       )}
 
-      {/* ── MAIN CONTENT ROW: [LeftSidebar | Content | RightSidebar] ── */}
+      {/* ── MAIN CONTENT AREA ── */}
       <View style={styles.contentRow}>
-        {/* Left Sidebar — in flex flow for focus navigation */}
-        {!isKids && !isSearch && <Sidebar side="left" />}
+        {/* Left focus guide strip — catches D-pad LEFT from content,
+            sidebar items are directly to the left of this strip */}
+        {!isKids && !isSearch && (
+          <View
+            style={styles.focusGuideLeft}
+            pointerEvents="box-none"
+          />
+        )}
 
-        {/* Content Area */}
         <View style={styles.contentArea}>
           <Tabs
             screenOptions={{
               headerShown: false,
               tabBarStyle: { display: 'none' },
+              animation: 'fade', // Smoother native fade transition
+              freezeOnBlur: true, // Optimizes background screens
             }}
           />
         </View>
 
-        {/* Right Sidebar — in flex flow for focus navigation */}
-        {!isKids && !isSearch && <Sidebar side="right" />}
+        {/* Right focus guide strip */}
+        {!isKids && !isSearch && (
+          <View
+            style={styles.focusGuideRight}
+            pointerEvents="box-none"
+          />
+        )}
       </View>
+
+      {/* ── OVERLAY MINI PLAYER ── */}
+      <MiniPlayer />
+
+      {/* ── OVERLAY SIDEBARS ── */}
+      {!isKids && !isSearch && (
+        <>
+          <Sidebar side="left" />
+          <Sidebar side="right" />
+        </>
+      )}
     </View>
   );
 }
 
-/* ── Styles ── */
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#0A0A0A',
   },
-
-  /* ─ Header ─ */
-  header: {
-    height: 64,
+  floatingPod: {
+    height: 60,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 28,
-    backgroundColor: 'rgba(18, 18, 18, 0.95)',
-    margin: 20,
-    marginBottom: 0,
-    borderRadius: 24,
+    backgroundColor: 'rgba(18, 18, 18, 0.5)',
+    borderRadius: 30,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,255,255,0.06)',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
     zIndex: 200,
-    overflow: 'hidden',
+    paddingHorizontal: 20,
   },
-  headerAccentLine: {
+  headerLeftPod: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 3,
-    backgroundColor: '#FF0000',
+    top: 24,
+    left: 24,
+  },
+  headerRightPod: {
+    position: 'absolute',
+    top: 24,
+    right: 24,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
   },
   logoBox: {
     width: 32,
@@ -242,15 +249,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  /* ─ Content ─ */
   contentRow: {
     flex: 1,
     flexDirection: 'row',
-    paddingTop: 12, // Space below floating header
+  },
+  focusGuideLeft: {
+    width: 100,
+    /* This column occupies the same space as the collapsed left sidebar,
+       ensuring the focus engine sees the sidebar items as 'inside' the
+       natural left boundary of the layout. */
+  },
+  focusGuideRight: {
+    width: 100,
   },
   contentArea: {
     flex: 1,
-    paddingHorizontal: 12, // Space from floating sidebars
   },
 });

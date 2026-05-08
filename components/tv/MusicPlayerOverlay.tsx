@@ -12,7 +12,8 @@ import {
   Shuffle,
   Repeat,
   Radio,
-  Gauge
+  Gauge,
+  X
 } from 'lucide-react-native';
 import { FocusablePressable } from './FocusablePressable';
 import { Video } from '@/lib/youtube';
@@ -40,6 +41,7 @@ interface MusicPlayerOverlayProps {
   onSeek?: (delta: number) => void;
   onNext?: () => void;
   onSetSpeed?: (speed: number) => void;
+  onClose?: () => void;
   playbackSpeed?: number;
 }
 
@@ -63,6 +65,7 @@ export function MusicPlayerOverlay({
   onSeek,
   onNext,
   onSetSpeed,
+  onClose,
   playbackSpeed = 1
 }: MusicPlayerOverlayProps) {
   const router = useRouter();
@@ -76,16 +79,28 @@ export function MusicPlayerOverlay({
 
   return (
     <View className="absolute inset-0 flex-row px-12 py-12 md:px-20 md:py-20 bg-black/40">
-      {/* Background Aura */}
+      {/* Background Aura — non-interactive */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
         <Image 
           source={{ uri: albumArt }} 
           style={StyleSheet.absoluteFill} 
           contentFit="cover"
-          blurRadius={50}
         />
         <View className="absolute inset-0 bg-black/60" />
       </View>
+
+      <Animated.View entering={FadeIn.duration(180)} className="absolute top-10 left-10 z-50">
+        <FocusablePressable
+          onPress={onClose}
+          className="w-14 h-14 bg-white/10 rounded-full items-center justify-center border border-white/10"
+          focusedClassName="bg-white scale-110"
+          activeScale={0.92}
+        >
+          {({ isFocused }) => (
+            <X size={28} color={isFocused ? 'black' : 'white'} strokeWidth={3} />
+          )}
+        </FocusablePressable>
+      </Animated.View>
       
       {/* Left Pane: Now Playing (Album Art & Controls) */}
       <View className="flex-1 justify-center z-20">
@@ -163,6 +178,7 @@ export function MusicPlayerOverlay({
                 
                 <FocusablePressable 
                   onPress={onTogglePlay}
+                  hasTVPreferredFocus
                   className="w-24 h-24 bg-white rounded-full items-center justify-center shadow-2xl"
                   focusedClassName="scale-110 bg-zinc-100"
                   activeScale={0.9}
@@ -199,7 +215,7 @@ export function MusicPlayerOverlay({
             />
           </View>
 
-          <View className="flex-1 bg-white/5 rounded-[40px] border border-white/10 overflow-hidden backdrop-blur-3xl">
+          <View className="flex-1 bg-white/5 rounded-[40px] border border-white/10 overflow-hidden">
             {activeTab === 'lyrics' ? (
               <ScrollView 
                 showsVerticalScrollIndicator={false} 
@@ -215,9 +231,9 @@ export function MusicPlayerOverlay({
                       focusedClassName="bg-white/10"
                       activeScale={1.02}
                       onPress={() => {
-                        if ('timeMs' in line) {
-                            const seekTarget = line.timeMs / 1000;
-                            onSeek?.(seekTarget - progress * totalDurationSeconds);
+                        if ('timeMs' in line && typeof line.timeMs === 'number') {
+                          const seekTarget = line.timeMs / 1000;
+                          onSeek?.(seekTarget - progress * totalDurationSeconds);
                         }
                       }}
                     >
@@ -248,6 +264,7 @@ export function MusicPlayerOverlay({
                 keyExtractor={(item) => item.id}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ padding: 30 }}
+                removeClippedSubviews={false}
                 renderItem={({ item }) => (
                   <FocusablePressable
                     className="flex-row items-center mb-6 p-4 rounded-3xl bg-white/5 border border-white/5"

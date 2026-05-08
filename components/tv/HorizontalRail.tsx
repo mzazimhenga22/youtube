@@ -1,7 +1,7 @@
 import React, { memo, useCallback } from 'react';
 import { View, Text, FlatList, DimensionValue } from 'react-native';
 import { VideoCard } from './VideoCard';
-import { router } from 'expo-router';
+import { playVideo } from '@/lib/navigation';
 import { Video } from '@/lib/youtube';
 
 interface HorizontalRailProps {
@@ -44,6 +44,7 @@ const MemoVideoCard = memo(({
       width={cardWidth}
       isLive={item.duration === 'LIVE' || (index === 0 && title === "Live Now")}
       progress={progress}
+      hasTVPreferredFocus={index === 0}
     />
   </View>
 ));
@@ -61,17 +62,7 @@ export const HorizontalRail = memo(function HorizontalRail({
     if (onPressVideo) {
       onPressVideo(video);
     } else {
-      router.push({
-        pathname: "/modal",
-        params: { 
-          id: video.id,
-          title: video.title,
-          channel: video.channel,
-          views: video.views,
-          thumbnail: video.thumbnail,
-          duration: video.duration
-        }
-      });
+      playVideo(video);
     }
   }, [onPressVideo]);
 
@@ -108,7 +99,7 @@ export const HorizontalRail = memo(function HorizontalRail({
         windowSize={5}
         maxToRenderPerBatch={4}
         updateCellsBatchingPeriod={50}
-        removeClippedSubviews={true}
+        removeClippedSubviews={false}
         getItemLayout={(_, index) => ({
           length: 400, // Approximate width + margin
           offset: 400 * index,

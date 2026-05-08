@@ -1,120 +1,194 @@
-import React from 'react';
-import { View, Text, StyleSheet, Image, ScrollView } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, Image, FlatList, Dimensions } from 'react-native';
 import { useAppStore } from '@/lib/store';
 import { FocusablePressable } from '@/components/tv/FocusablePressable';
-import { User, Settings, HelpCircle, LogOut, Bell, Shield, Clock, Heart } from 'lucide-react-native';
-import Animated, { FadeIn, FadeInLeft } from 'react-native-reanimated';
+import { HorizontalRail } from '@/components/tv/HorizontalRail';
+import { Settings, LogOut, User, Users, Bell, Shield, HelpCircle, History, Heart, Clock } from 'lucide-react-native';
+import Animated, { FadeIn, FadeInDown, useAnimatedStyle, interpolate, useSharedValue, withTiming } from 'react-native-reanimated';
 import { router } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { auth } from '@/lib/firebase';
+import { signOut } from 'firebase/auth';
 
-const PROFILE_ACTIONS = [
-  { id: 'settings', label: 'Settings', icon: Settings, route: '/(tabs)/settings' },
-  { id: 'history', label: 'Watch History', icon: Clock, route: '/(tabs)/library' },
-  { id: 'liked', label: 'Liked Videos', icon: Heart, route: '/(tabs)/library' },
-  { id: 'notifications', label: 'Notifications', icon: Bell },
-  { id: 'privacy', label: 'Privacy & Security', icon: Shield },
-  { id: 'help', label: 'Help & Support', icon: HelpCircle },
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+const QUICK_ACTIONS = [
+  { id: 'switch', label: 'Switch Profile', icon: Users },
+  { id: 'account', label: 'Add Account', icon: User },
+  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'help', label: 'Help', icon: HelpCircle },
 ];
 
 export default function ProfileScreen() {
-  const { currentProfile, logout } = useAppStore();
+  const { currentProfile, watchHistory, likedVideos, watchLater, logout } = useAppStore();
+  const [activeRail, setActiveRail] = useState<string | null>(null);
 
-  const handleLogout = () => {
+  const openProfilePicker = useCallback((openAuth = false) => {
+    router.replace({
+      pathname: '/',
+      params: {
+        skipSplash: '1',
+        ...(openAuth ? { auth: '1' } : {}),
+      },
+    });
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error('Firebase SignOut Error', e);
+    }
     logout();
-    router.replace('/');
-  };
+    openProfilePicker();
+  }, [logout, openProfilePicker]);
 
-  if (!currentProfile) return null;
+  const handleQuickAction = useCallback((id: string) => {
+    if (id === 'switch') {
+      openProfilePicker();
+      return;
+    }
+    if (id === 'account') {
+      openProfilePicker(true);
+      return;
+    }
+    if (id === 'settings') {
+      router.push('/(tabs)/settings' as any);
+      return;
+    }
+    if (id === 'help') {
+      router.push({ pathname: '/(tabs)/settings', params: { section: 'about' } } as any);
+    }
+  }, [openProfilePicker]);
 
-  return (
-    <View style={styles.container}>
-      {/* Left Profile Info */}
-      <View style={styles.leftColumn}>
-        <Animated.View entering={FadeIn.duration(1000)} className="items-center">
-          <View className="w-64 h-64 rounded-[80px] overflow-hidden border-8 border-white/10 mb-10 shadow-2xl">
-            <Image 
-              source={{ uri: currentProfile.avatar }} 
-              style={StyleSheet.absoluteFill}
-              resizeMode="cover"
-            />
+  const renderHeader = useCallback(() => {
+    if (!currentProfile) return null;
+
+    return (
+      <View className="px-16 pt-24 mb-16">
+        <Animated.View entering={FadeIn.duration(1000)} className="flex-row items-center mb-16">
+          {/* Avatar with dynamic glow */}
+          <View className="relative">
+             <View className="absolute -inset-4 bg-white/5 rounded-[48px] blur-3xl" />
+             <View className="w-44 h-44 rounded-[40px] overflow-hidden border-4 border-white/10 shadow-2xl">
+                <Image 
+                  source={typeof currentProfile.avatar === 'string' ? { uri: currentProfile.avatar } : currentProfile.avatar} 
+                  style={StyleSheet.absoluteFill}
+                  resizeMode="cover"
+                />
+             </View>
           </View>
-          <Text className="text-white text-6xl font-black mb-2">{currentProfile.name}</Text>
-          <Text className="text-zinc-500 text-3xl font-bold mb-12">{currentProfile.handle}</Text>
           
-          <FocusablePressable
-            onPress={() => router.replace('/')}
-            className="bg-white/10 px-10 py-5 rounded-full border-2 border-transparent"
-            focusedClassName="bg-white border-white scale-105"
-          >
-            {({ isFocused }) => (
-              <Text className={`text-2xl font-black ${isFocused ? 'text-black' : 'text-white'}`}>
-                SWITCH PROFILE
+          <View className="ml-12 flex-1">
+            <Text className="text-white text-7xl font-black tracking-tighter leading-none mb-2">
+              {currentProfile.name}
+            </Text>
+            <View className="flex-row items-center">
+              <Text className="text-zinc-500 text-3xl font-bold">{currentProfile.handle}</Text>
+              <View className="mx-4 w-2 h-2 bg-zinc-800 rounded-full" />
+              <Text className="text-zinc-500 text-3xl font-bold uppercase tracking-widest">
+                {currentProfile.mode} profile
               </Text>
-            )}
-          </FocusablePressable>
+            </View>
+          </View>
+
+          {/* Account Stats / Badges */}
+          <View className="flex-row bg-white/5 rounded-3xl p-6 border border-white/5" style={{ gap: 40 }}>
+             <View className="items-center">
+                <Text className="text-white text-3xl font-black">{watchHistory.length}</Text>
+                <Text className="text-zinc-600 text-sm font-black uppercase tracking-widest">Watched</Text>
+             </View>
+             <View className="items-center">
+                <Text className="text-white text-3xl font-black">{likedVideos.length}</Text>
+                <Text className="text-zinc-600 text-sm font-black uppercase tracking-widest">Liked</Text>
+             </View>
+          </View>
         </Animated.View>
-      </View>
 
-      {/* Right Actions Grid */}
-      <View style={styles.rightColumn}>
-        <Text className="text-zinc-500 text-xl font-black uppercase tracking-[4px] mb-8">
-          Account Settings
-        </Text>
-        
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingRight: 40, paddingBottom: 100 }}>
-          <View className="flex-row flex-wrap" style={{ gap: 24 }}>
-            {PROFILE_ACTIONS.map((action, index) => {
-              const Icon = action.icon;
-              return (
-                <Animated.View 
-                  key={action.id} 
-                  entering={FadeInLeft.delay(index * 100).duration(600)}
-                  style={{ width: '48%' }}
-                >
-                  <FocusablePressable
-                    onPress={() => action.route && router.push(action.route)}
-                    className="bg-white/5 p-8 rounded-[40px] flex-row items-center border-2 border-transparent"
-                    focusedClassName="bg-white scale-105"
-                  >
-                    {({ isFocused }) => (
-                      <>
-                        <View className={`w-16 h-16 rounded-3xl items-center justify-center ${isFocused ? 'bg-zinc-100' : 'bg-white/10'}`}>
-                          <Icon size={32} color={isFocused ? "black" : "white"} />
-                        </View>
-                        <Text className={`ml-6 text-2xl font-bold ${isFocused ? 'text-black' : 'text-white'}`}>
-                          {action.label}
-                        </Text>
-                      </>
-                    )}
-                  </FocusablePressable>
-                </Animated.View>
-              );
-            })}
-
-            {/* Logout Action */}
-            <Animated.View 
-              entering={FadeInLeft.delay(PROFILE_ACTIONS.length * 100).duration(600)}
-              style={{ width: '48%' }}
-            >
+        {/* Action Row */}
+        <View className="flex-row items-center" style={{ gap: 20 }}>
+          {QUICK_ACTIONS.map((action) => {
+            const Icon = action.icon;
+            return (
               <FocusablePressable
-                onPress={handleLogout}
-                className="bg-red-500/10 p-8 rounded-[40px] flex-row items-center border-2 border-transparent"
-                focusedClassName="bg-red-500 scale-105"
+                key={action.id}
+                onPress={() => handleQuickAction(action.id)}
+                className="bg-white/5 px-10 py-6 rounded-full flex-row items-center border-2 border-transparent"
+                focusedClassName="bg-white border-white scale-105 shadow-2xl shadow-white/20"
               >
                 {({ isFocused }) => (
                   <>
-                    <View className={`w-16 h-16 rounded-3xl items-center justify-center ${isFocused ? 'bg-white/20' : 'bg-red-500/20'}`}>
-                      <LogOut size={32} color="white" />
-                    </View>
-                    <Text className="ml-6 text-2xl font-bold text-white">
-                      Sign Out
+                    <Icon size={28} color={isFocused ? 'black' : 'white'} />
+                    <Text className={`ml-4 text-2xl font-black ${isFocused ? 'text-black' : 'text-white'}`}>
+                      {action.label}
                     </Text>
                   </>
                 )}
               </FocusablePressable>
-            </Animated.View>
-          </View>
-        </ScrollView>
+            );
+          })}
+
+          <FocusablePressable
+            onPress={handleLogout}
+            className="bg-red-500/10 px-10 py-6 rounded-full flex-row items-center border-2 border-transparent"
+            focusedClassName="bg-red-500 border-red-400 scale-105"
+          >
+            {({ isFocused }) => (
+              <>
+                <LogOut size={28} color="white" />
+                <Text className="ml-4 text-2xl font-black text-white">
+                  Sign Out
+                </Text>
+              </>
+            )}
+          </FocusablePressable>
+        </View>
       </View>
+    );
+  }, [currentProfile, watchHistory, likedVideos, handleLogout, handleQuickAction]);
+
+  const rails = [
+    { title: 'Recently Played', data: watchHistory, icon: History },
+    { title: 'Liked Videos', data: likedVideos, icon: Heart },
+    { title: 'Watch Later', data: watchLater, icon: Clock },
+  ];
+
+  const renderRail = useCallback(({ item, index }: { item: any, index: number }) => {
+    if (item.data.length === 0) return null;
+    
+    return (
+      <Animated.View entering={FadeInDown.delay(200 + index * 100).duration(800)}>
+        <HorizontalRail 
+          title={item.title}
+          videos={item.data}
+        />
+      </Animated.View>
+    );
+  }, []);
+
+  return (
+    <View style={styles.container}>
+      {/* Background Ambient Glow */}
+      <View style={styles.ambientGlow} />
+      
+      <FlatList
+        data={rails}
+        keyExtractor={(item) => item.title}
+        ListHeaderComponent={renderHeader}
+        renderItem={renderRail}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 100 }}
+      />
+
+      {/* Edge Fades */}
+      <LinearGradient 
+        colors={['#0f0f0f', 'transparent']} 
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 100, zIndex: 50, pointerEvents: 'none' }} 
+      />
+      <LinearGradient 
+        colors={['transparent', '#0f0f0f']} 
+        style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 100, zIndex: 50, pointerEvents: 'none' }} 
+      />
     </View>
   );
 }
@@ -122,20 +196,15 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#050505',
-    flexDirection: 'row',
-    padding: 60,
+    backgroundColor: '#0f0f0f',
   },
-  leftColumn: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRightWidth: 1,
-    borderRightColor: 'rgba(255,255,255,0.05)',
-  },
-  rightColumn: {
-    flex: 2,
-    paddingLeft: 60,
-    justifyContent: 'center',
+  ambientGlow: {
+    position: 'absolute',
+    top: -100,
+    left: '10%',
+    width: '80%',
+    height: 600,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: SCREEN_WIDTH,
   }
 });

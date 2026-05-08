@@ -105,6 +105,147 @@ const files = [
       ],
     ],
   },
+  {
+    path: path.join(packageRoot, "dist", "runtime", "third-party-libs", "react-native-safe-area-context.native.js"),
+    replacements: [
+      [
+        "function maybeHijackSafeAreaProvider(type) {\n    const name = type.displayName || type.name;",
+        "function maybeHijackSafeAreaProvider(type) {\n    if (!type) return type;\n    const name = type.displayName || type.name;",
+      ],
+    ],
+  },
+  {
+    path: path.join(packageRoot, "dist", "runtime", "native", "render-component.js"),
+    replacements: [
+      [
+        `        const newValue = Array.isArray(value) ? [] : {};
+        for (const entry of Object.entries(value)) {
+            newValue[entry[0]] = replace(entry[0], entry[1]);
+        }
+        seen.delete(value);
+        return newValue;`,
+        `        const newValue = Array.isArray(value) ? [] : {};
+        let entries;
+        try {
+            entries = Object.entries(value);
+        }
+        catch (error) {
+            seen.delete(value);
+            return \`[Unserializable: \${error?.message ?? "unknown error"}]\`;
+        }
+        for (const entry of entries) {
+            try {
+                newValue[entry[0]] = replace(entry[0], entry[1]);
+            }
+            catch (error) {
+                newValue[entry[0]] = \`[Unserializable: \${error?.message ?? "unknown error"}]\`;
+            }
+        }
+        seen.delete(value);
+        return newValue;`,
+      ],
+      [
+        `        if (seen.has(value)) {
+            return "[Circular]";
+        }
+        seen.add(value);`,
+        `        if (seen.has(value)) {
+            return "[Circular]";
+        }
+        if ("_isReanimatedSharedValue" in value ||
+            ("get" in value && "set" in value && typeof value.get === "function")) {
+            return "[SharedValue]";
+        }
+        seen.add(value);`,
+      ],
+      [
+        `            if ("_isReanimatedSharedValue" in value && "value" in value) {
+                return \`\${value.value} (animated value)\`;
+            }
+            if ("get" in value && typeof value.get === "function") {
+                return value.get();
+            }`,
+        `            if ("_isReanimatedSharedValue" in value && "value" in value) {
+                return "[SharedValue]";
+            }
+            if ("get" in value && typeof value.get === "function") {
+                return "[Observable]";
+            }`,
+      ],
+    ],
+  },
+  {
+    path: path.join(packageRoot, "src", "runtime", "native", "render-component.tsx"),
+    replacements: [
+      [
+        `      const newValue: any = Array.isArray(value) ? [] : {};
+
+      for (const entry of Object.entries(value)) {
+        newValue[entry[0]] = replace(entry[0], entry[1]);
+      }
+
+      seen.delete(value);
+
+      return newValue;`,
+        `      const newValue: any = Array.isArray(value) ? [] : {};
+
+      let entries: [string, any][];
+      try {
+        entries = Object.entries(value);
+      } catch (error: any) {
+        seen.delete(value);
+        return \`[Unserializable: \${error?.message ?? "unknown error"}]\`;
+      }
+
+      for (const entry of entries) {
+        try {
+          newValue[entry[0]] = replace(entry[0], entry[1]);
+        } catch (error: any) {
+          newValue[entry[0]] = \`[Unserializable: \${error?.message ?? "unknown error"}]\`;
+        }
+      }
+
+      seen.delete(value);
+
+      return newValue;`,
+      ],
+      [
+        `      if (seen.has(value)) {
+        return "[Circular]";
+      }
+
+      seen.add(value);`,
+        `      if (seen.has(value)) {
+        return "[Circular]";
+      }
+
+      if (
+        "_isReanimatedSharedValue" in value ||
+        ("get" in value && "set" in value && typeof value.get === "function")
+      ) {
+        return "[SharedValue]";
+      }
+
+      seen.add(value);`,
+      ],
+      [
+        `      if ("_isReanimatedSharedValue" in value && "value" in value) {
+        return \`\${value.value} (animated value)\`;
+      }
+
+      if ("get" in value && typeof value.get === "function") {
+        return value.get();
+      }`,
+        `      if ("_isReanimatedSharedValue" in value && "value" in value) {
+        return "[SharedValue]";
+      }
+
+      if ("get" in value && typeof value.get === "function") {
+        return "[Observable]";
+      }`,
+      ],
+    ],
+  },
 ];
 
 for (const target of files) {

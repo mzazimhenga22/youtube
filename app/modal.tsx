@@ -1,23 +1,25 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Image, StyleSheet, ActivityIndicator, Text, FlatList, Dimensions } from 'react-native';
+import { View, Image, StyleSheet, ActivityIndicator, Text, FlatList, Dimensions, ScrollView, BackHandler } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { VideoPlayerOverlay } from '@/components/tv/VideoPlayerOverlay';
 import { MusicPlayerOverlay } from '@/components/tv/MusicPlayerOverlay';
 import { StatusBar } from 'expo-status-bar';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { VideoView } from 'expo-video';
 import { youtubeService, Video, Chapter } from '@/lib/youtube';
+import { playVideo } from '@/lib/navigation';
 import { fetchLyrics, LyricsData } from '@/lib/lyrics';
-import Animated, { 
-  useAnimatedStyle, 
-  withSpring, 
+import Animated, {
+  useAnimatedStyle,
+  withSpring,
   interpolate,
   useSharedValue,
   FadeInRight,
   FadeOutRight
 } from 'react-native-reanimated';
 import { useAppStore } from '@/lib/store';
+import { useGlobalPlayer } from '@/lib/PlayerContext';
 import { FocusablePressable } from '@/components/tv/FocusablePressable';
-import { User, MessageSquare, Play, X } from 'lucide-react-native';
+import { User, MessageSquare, Play, X, Music } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { savePlaybackProgress, getPlaybackProgress } from '@/lib/db';
@@ -60,20 +62,23 @@ export default function VideoPlayerScreen() {
   const upNextTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null);
   const hasEndedRef = useRef(false);
-  
+  const isClosingRef = useRef(false);
+
   const layoutProgress = useSharedValue(0);
 
-  const { 
-    globalVideo, 
-    globalStreamUrl, 
-    setGlobalPlayback, 
+  const {
+    globalVideo,
+    globalStreamUrl,
+    setGlobalPlayback,
     setGlobalPlaying,
-    setGlobalProgress
+    setGlobalProgress,
+    setGlobalStreamUrl,
+    setGlobalLoading
   } = useAppStore();
 
   // Detect if this is a music track (explicitly passed or heuristic)
   const isMusic = params.type === 'music' || (
-    params.channel?.toLowerCase().includes('vevo') || 
+    params.channel?.toLowerCase().includes('vevo') ||
     params.channel?.toLowerCase().includes('music') ||
     params.title?.toLowerCase().includes('official audio') ||
     params.title?.toLowerCase().includes('lyrics')
@@ -101,64 +106,107 @@ export default function VideoPlayerScreen() {
     layoutProgress.value = withSpring((isCommentsOpen || isLyricsOpen) ? 1 : 0, { damping: 15 });
   }, [isCommentsOpen, isLyricsOpen]);
 
-  const player = useVideoPlayer(streamUrl || '', (player) => {
-    player.loop = false; // Never loop — we autoplay next
-    player.timeUpdateEventInterval = 0.5;
-    player.playbackRate = playbackSpeed;
-    player.play();
-  });
+  const { player } = useGlobalPlayer();
+
+  const handleClosePlayer = useCallback(() => {
+    if (isCommentsOpen) {
+      setIsCommentsOpen(false);
+      return;
+    }
+
+    if (isLyricsOpen) {
+      setIsLyricsOpen(false);
+      return;
+    }
+
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+    setShowUpNext(false);
+    setUpNextCountdown(0);
+    if (upNextTimerRef.current) clearTimeout(upNextTimerRef.current);
+
+    requestAnimationFrame(() => {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/');
+      }
+    });
+  }, [isCommentsOpen, isLyricsOpen]);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleClosePlayer();
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [handleClosePlayer]);
 
   // Update playback speed when state changes
   useEffect(() => {
     player.playbackRate = playbackSpeed;
+    player.loop = false;
+    player.timeUpdateEventInterval = 0.5;
   }, [playbackSpeed, player]);
 
-  // Cleanup player on unmount - Only pause if NOT music to allow bg play
+  // Cleanup player on unmount - Only pause if NOT music to allow bg play (MiniPlayer)
   useEffect(() => {
     return () => {
       if (!isMusic) {
-        try {
-          player.pause();
-        } catch (e) {
-          console.warn('[Modal] Player cleanup failed:', e);
-        }
+        setGlobalPlaying(false);
+        setGlobalStreamUrl(null);
+        setGlobalPlayback(null, null);
       }
     };
-  }, [player, isMusic]);
+  }, [isMusic, setGlobalPlaying, setGlobalPlayback, setGlobalStreamUrl]);
 
   // Fetch real stream URL, recommendations, progress, and Live Chat / Comments
   useEffect(() => {
     async function fetchData() {
       if (!params.id) return;
-      try {
-        const [details, related, history, saved] = await Promise.all([
-          youtubeService.getVideoDetails(params.id),
-          youtubeService.getRelatedVideos({ 
-            id: params.id, 
-            title: params.title || '', 
-            channel: params.channel || '', 
-            views: params.views || '', 
-            thumbnail: params.thumbnail || '', 
-            duration: params.duration || '' 
-          }),
-          getWatchHistoryFromFirestore(),
-          getPlaybackProgress(params.id)
-        ]);
 
-        // Check if we already have the stream from global background (Music tab)
-        if (globalVideo?.id === params.id && globalStreamUrl) {
+      // If we already have the stream from navigation, we don't need to show the loader again
+      const hasStream = globalVideo?.id === params.id && globalStreamUrl;
+      if (!hasStream) {
+        setGlobalLoading(true);
+      }
+
+      try {
+        // 1. Prioritize Stream Retrieval to start playback ASAP
+        if (hasStream) {
           console.log('[Modal] 🚀 Unifying with background playback');
           setStreamUrl(globalStreamUrl);
+          setGlobalPlaying(true);
         } else {
           const stream = await youtubeService.getStream(params.id);
           if (stream) {
             setStreamUrl(stream.url);
             setGlobalPlayback(params as any, stream.url);
+            setGlobalPlaying(true);
           }
         }
-        
+
+        // 2. Proactively hide loader once the video is ready to play
+        setGlobalLoading(false);
+
+        // 3. Fetch secondary data in parallel
+        const [details, related, history, saved] = await Promise.all([
+          youtubeService.getVideoDetails(params.id).catch(() => null),
+          youtubeService.getRelatedVideos({
+            id: params.id,
+            title: params.title || '',
+            channel: params.channel || '',
+            views: params.views || '',
+            thumbnail: params.thumbnail || '',
+            duration: params.duration || ''
+          }).catch(() => []),
+          getWatchHistoryFromFirestore().catch(() => []),
+          getPlaybackProgress(params.id).catch(() => null)
+        ]);
+
         if (details) setVideoDetails(details);
-        
+
         // Setup recommendation rows
         const rows = [
           { title: 'Up Next', data: related.slice(0, 8) },
@@ -166,17 +214,17 @@ export default function VideoPlayerScreen() {
           { title: 'For You', data: (history as Video[]).slice(0, 8) },
           { title: 'Trending Now', data: (history as Video[]).slice(8, 16) },
         ].filter(r => r.data && r.data.length > 0);
-        
+
         setRecommendationRows(rows);
         if (related.length > 0) setUpNextVideo(related[0]);
 
         // Secondary data (comments/chat)
         if (params.isLive === 'true') {
-          youtubeService.getLiveChat(params.id).then(setLiveChat);
+          youtubeService.getLiveChat(params.id).then(setLiveChat).catch(() => {});
         } else {
-          youtubeService.getComments(params.id).then(setComments);
+          youtubeService.getComments(params.id).then(setComments).catch(() => {});
         }
-        
+
         // Resume Progress
         if (saved && saved.time > 10) {
           setSavedTime(saved.time);
@@ -184,9 +232,11 @@ export default function VideoPlayerScreen() {
         }
 
         // Fetch Lyrics
-        fetchLyrics(params.title || '', params.channel || '').then(setLyrics);
+        fetchLyrics(params.title || '', params.channel || '').then(setLyrics).catch(() => {});
       } catch (e) {
         console.warn('[Modal] Fetch failed:', e);
+      } finally {
+        setGlobalLoading(false);
       }
     }
 
@@ -198,14 +248,14 @@ export default function VideoPlayerScreen() {
     setCurrentChapter(null);
     setLyrics(null);
     setActiveLyricIndex(-1);
-    
+
     fetchData();
   }, [params.id]);
 
   // Live Chat Polling
   useEffect(() => {
     if (!params.isLive || !params.id) return;
-    
+
     const interval = setInterval(async () => {
        const newChat = await youtubeService.getLiveChat(params.id as string);
        if (newChat.length > 0) {
@@ -232,7 +282,7 @@ export default function VideoPlayerScreen() {
   // Periodic Save
   useEffect(() => {
     if (!streamUrl || !params.id) return;
-    
+
     const interval = setInterval(() => {
       const duration = durationRef.current;
       const currentTime = elapsedSecondsRef.current;
@@ -274,6 +324,7 @@ export default function VideoPlayerScreen() {
       if (player.duration > 0) {
         const currentProgress = Math.max(0, Math.min(1, event.currentTime / player.duration));
         setProgress(currentProgress);
+        setGlobalProgress(currentProgress);
 
         // Track Current Chapter
         if (videoDetails?.chapters) {
@@ -285,7 +336,9 @@ export default function VideoPlayerScreen() {
 
         // Track Synced Lyrics
         if (lyrics?.type === 'synced' && lyrics.lines) {
-          const index = [...lyrics.lines].reverse().findIndex(line => currentTimeMs >= line.timeMs);
+          const index = [...lyrics.lines].reverse().findIndex(line => (
+            typeof line.timeMs === 'number' && currentTimeMs >= line.timeMs
+          ));
           const finalIndex = index !== -1 ? (lyrics.lines.length - 1 - index) : -1;
           if (finalIndex !== activeLyricIndex) {
             setActiveLyricIndex(finalIndex);
@@ -300,12 +353,12 @@ export default function VideoPlayerScreen() {
       }
     });
     return () => subscription.remove();
-  }, [player, upNextVideo, showUpNext, videoDetails, currentChapter, lyrics, activeLyricIndex]);
+  }, [player, upNextVideo, showUpNext, videoDetails, currentChapter, lyrics, activeLyricIndex, setGlobalProgress]);
 
   // Listen for playback ending to auto-advance
   useEffect(() => {
-    const subscription = player.addListener('statusChange', (event: any) => {
-      if (event.status === 'idle' && !hasEndedRef.current && upNextVideo) {
+    const subscription = player.addListener('playToEnd', () => {
+      if (!hasEndedRef.current && upNextVideo) {
         hasEndedRef.current = true;
         playNextVideo();
       }
@@ -337,22 +390,12 @@ export default function VideoPlayerScreen() {
     };
   }, [showUpNext, upNextCountdown, upNextVideo]);
 
-  const playNextVideo = useCallback(() => {
+  const playNextVideo = useCallback(async () => {
     if (!upNextVideo) return;
     setShowUpNext(false);
     setUpNextCountdown(0);
-    router.replace({
-      pathname: '/modal',
-      params: {
-        id: upNextVideo.id,
-        title: upNextVideo.title,
-        channel: upNextVideo.channel,
-        views: upNextVideo.views,
-        thumbnail: upNextVideo.thumbnail,
-        duration: upNextVideo.duration,
-      },
-    });
-  }, [upNextVideo, router]);
+    playVideo(upNextVideo, {}, true);
+  }, [upNextVideo]);
 
   const cancelUpNext = useCallback(() => {
     setShowUpNext(false);
@@ -361,7 +404,7 @@ export default function VideoPlayerScreen() {
   }, []);
 
   const { width: screenWidth } = Dimensions.get('window');
-  
+
   const animatedPlayerStyle = useAnimatedStyle(() => {
     return {
       transform: [
@@ -379,16 +422,15 @@ export default function VideoPlayerScreen() {
   return (
     <View style={styles.container} className="bg-[#0a0e14]">
       <StatusBar hidden />
-      
+
       {/* Ambient Background Layer */}
-      <Animated.View 
+      <Animated.View
         style={StyleSheet.absoluteFill}
         className="opacity-40"
       >
-        <Image 
-          source={{ uri: params.thumbnail }} 
+        <Image
+          source={{ uri: params.thumbnail }}
           style={StyleSheet.absoluteFill}
-          blurRadius={80}
         />
         <LinearGradient
           colors={['transparent', 'rgba(10,14,20,0.8)', '#0a0e14']}
@@ -398,15 +440,13 @@ export default function VideoPlayerScreen() {
 
       {/* Animated Video Container */}
       <Animated.View style={[StyleSheet.absoluteFillObject, animatedPlayerStyle, { backgroundColor: '#18181b', shadowColor: '#000', shadowOffset: { width: 0, height: 25 }, shadowOpacity: 0.5, shadowRadius: 50, elevation: 30 }]}>
-        {streamUrl ? (
-          <VideoView 
-            player={player} 
-            style={StyleSheet.absoluteFill} 
+        {streamUrl && (
+          <VideoView
+            player={player}
+            style={StyleSheet.absoluteFill}
             contentFit="contain"
             nativeControls={false}
           />
-        ) : (
-          <SingularityLoader transparent minimal />
         )}
 
         {/* Resume Prompt Overlay */}
@@ -417,11 +457,11 @@ export default function VideoPlayerScreen() {
               <Text className="text-zinc-500 text-base md:text-lg font-bold mb-6 text-center">
                 You stopped at {formatTime(savedTime)}. Resume?
               </Text>
-              
+
               <View className="flex-row" style={{ gap: 12 }}>
-                <FocusablePressable 
+                <FocusablePressable
                   onPress={() => {
-                    player.seekBy(savedTime);
+                    player.currentTime = savedTime;
                     setShowResumePrompt(false);
                   }}
                   className="bg-white px-8 py-4 rounded-full"
@@ -429,8 +469,8 @@ export default function VideoPlayerScreen() {
                 >
                   <Text className="text-black font-black text-lg">Resume</Text>
                 </FocusablePressable>
-                
-                <FocusablePressable 
+
+                <FocusablePressable
                   onPress={() => setShowResumePrompt(false)}
                   className="bg-white/10 px-8 py-4 rounded-full"
                   focusedClassName="bg-white"
@@ -447,7 +487,7 @@ export default function VideoPlayerScreen() {
         {/* Overlay - Only visible when sidebars are CLOSED */}
         {(!isCommentsOpen && !isLyricsOpen) && (
           isMusic ? (
-            <MusicPlayerOverlay 
+            <MusicPlayerOverlay
               title={params.title || "Unknown Track"}
               artist={params.channel || "Unknown Artist"}
               albumArt={params.thumbnail || ""}
@@ -474,14 +514,15 @@ export default function VideoPlayerScreen() {
                 try { player.seekBy(delta); } catch {}
               }}
               onNext={playNextVideo}
+              onClose={handleClosePlayer}
               onSetSpeed={(speed) => setPlaybackSpeed(speed)}
               playbackSpeed={playbackSpeed}
             />
           ) : (
-            <VideoPlayerOverlay 
+            <VideoPlayerOverlay
               title={params.title || "Unknown Video"}
               channelName={params.channel || "Unknown Channel"}
-              channelAvatar={params.thumbnail || ""} 
+              channelAvatar={params.thumbnail || ""}
               isPlaying={isPlaying}
               progress={progress}
               currentTime={formatTime(elapsedSeconds)}
@@ -506,6 +547,7 @@ export default function VideoPlayerScreen() {
                 setIsCommentsOpen(false);
               }}
               onNext={playNextVideo}
+              onClose={handleClosePlayer}
               onSetSpeed={(speed) => setPlaybackSpeed(speed)}
               onSeek={(delta) => {
                 try { player.seekBy(delta); } catch {}
@@ -531,7 +573,7 @@ export default function VideoPlayerScreen() {
               colors={['rgba(255, 0, 0, 0.15)', 'transparent']}
               style={StyleSheet.absoluteFill}
             />
-            
+
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={{ color: 'white', fontSize: 16, fontWeight: '900', letterSpacing: -0.5 }}>Up Next</Text>
@@ -580,7 +622,7 @@ export default function VideoPlayerScreen() {
                 </>
               )}
             </FocusablePressable>
-            
+
             {/* Glowing Progress Aura */}
             <View style={{ height: 4, backgroundColor: 'rgba(255,255,255,0.05)' }}>
               <LinearGradient
@@ -596,17 +638,17 @@ export default function VideoPlayerScreen() {
 
       {/* Comments Sidebar (Aura Redesign) */}
       {isCommentsOpen && (
-        <Animated.View 
+        <Animated.View
           entering={FadeInRight.duration(400)}
           exiting={FadeOutRight.duration(300)}
-          style={{ 
-            position: 'absolute', 
-            right: 0, 
-            top: 0, 
-            bottom: 0, 
-            width: screenWidth < 768 ? screenWidth * 0.92 : screenWidth * 0.42, 
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: screenWidth < 768 ? screenWidth * 0.92 : screenWidth * 0.42,
             backgroundColor: 'rgba(5, 5, 5, 0.85)',
-            zIndex: 100 
+            zIndex: 100
           }}
         >
           {/* Side Aura Light Bleed */}
@@ -626,7 +668,7 @@ export default function VideoPlayerScreen() {
                   {params.isLive ? 'Live Chat' : 'Comments'}
                 </Text>
               </View>
-              <FocusablePressable 
+              <FocusablePressable
                 onPress={() => setIsCommentsOpen(false)}
                 className="bg-white/10 rounded-xl"
                 focusedClassName="bg-white"
@@ -645,7 +687,7 @@ export default function VideoPlayerScreen() {
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: 60 }}
             renderItem={({ item }) => (
-              <FocusablePressable 
+              <FocusablePressable
                 className="rounded-2xl bg-white/5 border border-white/5"
                 focusedClassName="bg-white/10 border-white/20 scale-[1.01]"
                 style={{ marginBottom: screenWidth < 768 ? 8 : 12, padding: screenWidth < 768 ? 12 : 16 }}
@@ -680,17 +722,17 @@ export default function VideoPlayerScreen() {
 
       {/* Lyrics Sidebar (Unified with Music design) */}
       {isLyricsOpen && (
-        <Animated.View 
+        <Animated.View
           entering={FadeInRight.duration(400)}
           exiting={FadeOutRight.duration(300)}
-          style={{ 
-            position: 'absolute', 
-            right: 0, 
-            top: 0, 
-            bottom: 0, 
-            width: screenWidth < 768 ? screenWidth * 0.92 : screenWidth * 0.42, 
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: screenWidth < 768 ? screenWidth * 0.92 : screenWidth * 0.42,
             backgroundColor: 'rgba(5, 5, 5, 0.85)',
-            zIndex: 100 
+            zIndex: 100
           }}
         >
           {/* Side Aura Light Bleed */}
@@ -710,7 +752,7 @@ export default function VideoPlayerScreen() {
                   Lyrics
                 </Text>
               </View>
-              <FocusablePressable 
+              <FocusablePressable
                 onPress={() => setIsLyricsOpen(false)}
                 className="bg-white/10 rounded-xl"
                 focusedClassName="bg-white"
@@ -725,7 +767,7 @@ export default function VideoPlayerScreen() {
             {/* Lyrics Content */}
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
               {lyrics ? (
-                (lyrics.type === 'synced' ? lyrics.lines : lyrics.raw?.split('\n').map(l => ({ text: l })) || []).map((line, index) => {
+                (lyrics.type === 'synced' ? (lyrics.lines || []) : (lyrics.raw?.split('\n').map(l => ({ text: l })) || [])).map((line, index) => {
                   const isActive = index === activeLyricIndex;
                   return (
                     <FocusablePressable
@@ -734,15 +776,15 @@ export default function VideoPlayerScreen() {
                       focusedClassName="bg-white/10"
                       activeScale={1.02}
                       onPress={() => {
-                        if ('timeMs' in line) {
-                            try { player.seekTo(line.timeMs / 1000); } catch {}
+                        if ('timeMs' in line && typeof line.timeMs === 'number') {
+                          try { player.currentTime = line.timeMs / 1000; } catch {}
                         }
                       }}
                     >
                       {({ isFocused }) => (
-                        <Text 
+                        <Text
                           className={`font-black leading-tight transition-all duration-700 tracking-tighter ${isActive || isFocused ? 'text-white scale-105' : 'text-white/40'}`}
-                          style={{ 
+                          style={{
                             fontSize: screenWidth < 768 ? 24 : 40,
                             opacity: isActive || isFocused ? 1 : 0.4
                           }}

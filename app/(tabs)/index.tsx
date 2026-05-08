@@ -5,13 +5,13 @@ import { HeroBanner } from '@/components/tv/HeroBanner';
 import { youtubeService, Video } from '@/lib/youtube';
 import { useAppStore } from '@/lib/store';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Image } from 'expo-image';
 import KidsHomeScreen from '@/components/tv/KidsHomeScreen';
 import { FocusablePressable } from '@/components/tv/FocusablePressable';
 import { Sparkles, TrendingUp, Gamepad2, Music2, Clapperboard, Monitor, Newspaper, ChefHat, TreePine, Zap } from 'lucide-react-native';
 import { SingularityLoader } from '@/components/tv/SingularityLoader';
 import { getContinueWatchingFromFirestore, getProgressMapFromFirestore } from '@/lib/firestore';
 import { getWatchHistory } from '@/lib/db';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useScreenGC } from '@/lib/useScreenGC';
 
 const CATEGORIES = [
@@ -53,8 +53,6 @@ const FALLBACK_VIDEOS: Video[] = [
   }
 ];
 
-/* AmbientBackground removed — was causing washed-out content */
-
 async function safeFetch<T>(fn: () => Promise<T>, fallback: T, label = 'fetch'): Promise<T> {
   try {
     return await Promise.race([
@@ -65,6 +63,26 @@ async function safeFetch<T>(fn: () => Promise<T>, fallback: T, label = 'fetch'):
     console.warn(`[HomeScreen] ${label} failed:`, e);
     return fallback;
   }
+}
+
+function mergeRailData(
+  prev: Record<string, Video[]>,
+  updates: Record<string, Video[]>
+): Record<string, Video[]> {
+  let next = prev;
+  let changed = false;
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (prev[key] !== value) {
+      if (!changed) {
+        next = { ...prev };
+        changed = true;
+      }
+      next[key] = value;
+    }
+  }
+
+  return next;
 }
 
 class HomeErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
@@ -85,28 +103,189 @@ class HomeErrorBoundary extends Component<{ children: React.ReactNode }, { hasEr
   }
 }
 
+// ── Memoized Components for Extreme TV Performance ──
+
+const CategoryChip = memo(({
+  item,
+  isActive,
+  onSelect,
+}: {
+  item: typeof CATEGORIES[0];
+  isActive: boolean;
+  onSelect: (label: string) => void;
+}) => {
+  const Icon = item.icon;
+  return (
+    <FocusablePressable
+      onPress={() => onSelect(item.label)}
+      className={`flex-row items-center rounded-3xl mr-4 border-2 ${isActive ? 'bg-white border-white' : 'bg-white/5 border-transparent'}`}
+      focusedClassName="bg-white scale-110 shadow-2xl shadow-white/20"
+      style={{ paddingHorizontal: 28, paddingVertical: 16, gap: 12 }}
+    >
+      {({ isFocused }) => (
+        <>
+          <Icon size={24} color={isFocused || isActive ? 'black' : item.color} />
+          <Text className="font-black text-2xl" style={{ color: isFocused || isActive ? 'black' : 'white' }}>{item.label}</Text>
+        </>
+      )}
+    </FocusablePressable>
+  );
+}, (prev, next) => (
+  prev.item.label === next.item.label &&
+  prev.isActive === next.isActive &&
+  prev.onSelect === next.onSelect
+));
+
+const MemoizedCategoryRail = memo(({
+  activeCategory,
+  onSelectCategory,
+}: {
+  activeCategory: string;
+  onSelectCategory: (label: string) => void;
+}) => (
+  <View style={{ marginBottom: 40, position: 'relative' }}>
+    <FlatList
+      horizontal
+      data={CATEGORIES}
+      keyExtractor={(item) => item.label}
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={{ paddingHorizontal: 24 }}
+      initialNumToRender={5}
+      windowSize={5}
+      removeClippedSubviews={false} // False is usually better for horizontal TV carousels to prevent focus loss
+      extraData={activeCategory}
+      renderItem={({ item }) => (
+        <CategoryChip
+          item={item}
+          isActive={item.label === activeCategory}
+          onSelect={onSelectCategory}
+        />
+      )}
+    />
+    <LinearGradient
+      colors={['#0A0A0A', 'transparent']}
+      start={{ x: 0, y: 0.5 }}
+      end={{ x: 1, y: 0.5 }}
+      style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 40, zIndex: 10, pointerEvents: 'none' }}
+    />
+    <LinearGradient
+      colors={['transparent', '#0A0A0A']}
+      start={{ x: 0, y: 0.5 }}
+      end={{ x: 1, y: 0.5 }}
+      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 40, zIndex: 10, pointerEvents: 'none' }}
+    />
+  </View>
+), (prev, next) => (
+  prev.activeCategory === next.activeCategory &&
+  prev.onSelectCategory === next.onSelectCategory
+));
+
+const MemoizedHero = memo(({ videos }: { videos?: Video[] }) => {
+  if (!videos || videos.length === 0) {
+    return (
+      <View style={{ height: 600 }} className="w-full bg-white/5 items-center justify-center">
+        <Zap size={48} color="rgba(255,255,255,0.1)" />
+      </View>
+    );
+  }
+  return (
+    <HeroBanner
+      title={videos[0].title}
+      description={videos[0].channel}
+      thumbnail={videos[0].thumbnail}
+      videos={videos}
+    />
+  );
+}, (prev, next) => {
+  if (!prev.videos || !next.videos) return prev.videos === next.videos;
+  if (prev.videos.length !== next.videos.length) return false;
+  return prev.videos[0]?.id === next.videos[0]?.id;
+});
+
+const HomeHeader = memo(({
+  heroVideos,
+  continueWatching,
+  progressMap,
+  activeCategory,
+  onSelectCategory,
+  onFocusVideo
+}: {
+  heroVideos?: Video[];
+  continueWatching: Video[];
+  progressMap: Map<string, number>;
+  activeCategory: string;
+  onSelectCategory: (label: string) => void;
+  onFocusVideo: (t: string | null) => void;
+}) => {
+  return (
+    <View>
+      <MemoizedHero videos={heroVideos} />
+      <MemoizedCategoryRail activeCategory={activeCategory} onSelectCategory={onSelectCategory} />
+      {activeCategory === 'Recommended' && continueWatching.length > 0 && (
+        <MemoizedRail
+          title="Continue Watching"
+          videos={continueWatching}
+          progressMap={progressMap}
+          onFocusVideo={onFocusVideo}
+        />
+      )}
+    </View>
+  );
+}, (prev, next) => {
+  return prev.heroVideos === next.heroVideos &&
+         prev.continueWatching === next.continueWatching &&
+         prev.progressMap === next.progressMap &&
+         prev.activeCategory === next.activeCategory &&
+         prev.onSelectCategory === next.onSelectCategory;
+});
+
+const MemoizedRail = memo(({
+  title,
+  videos,
+  progressMap,
+  onFocusVideo
+}: {
+  title: string;
+  videos?: Video[];
+  progressMap: Map<string, number>;
+  onFocusVideo: (t: string | null) => void
+}) => {
+  if (!videos || videos.length === 0) return null;
+  return (
+    <View className="mb-8">
+      <HorizontalRail
+        title={title}
+        videos={videos}
+        onFocusVideo={onFocusVideo}
+        progressMap={progressMap}
+      />
+    </View>
+  );
+}, (prev, next) => prev.videos === next.videos && prev.progressMap === next.progressMap);
+
+// ── Main Screen ──
+
 function HomeScreenInner() {
   const { currentProfile, setAmbientState } = useAppStore();
   const [railData, setRailData] = useState<Record<string, Video[]>>({
     "Recommended": FALLBACK_VIDEOS
   });
-  const [loading, setLoading] = useState(false);
-  const [focusedThumbnail, setFocusedThumbnail] = useState<string | null>(FALLBACK_VIDEOS[0].thumbnail);
+  const [loading, setLoading] = useState(true);
   const [continueWatching, setContinueWatching] = useState<Video[]>([]);
   const [progressMap, setProgressMap] = useState<Map<string, number>>(new Map());
   const focusTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const categoryRequestsRef = React.useRef<Set<string>>(new Set());
   const isKids = currentProfile?.mode === 'kids';
   const [gcCycle, setGcCycle] = useState(0);
+  const [activeCategory, setActiveCategory] = useState('Recommended');
 
-  // ── Screen Garbage Collector ──
-  // Releases heavy state (video arrays, thumbnails) after 30s of inactivity
   useScreenGC('Home', {
     delayMs: 30_000,
     onCleanup: useCallback(() => {
       setRailData({ 'Recommended': FALLBACK_VIDEOS });
       setContinueWatching([]);
       setProgressMap(new Map());
-      setFocusedThumbnail(FALLBACK_VIDEOS[0].thumbnail);
+      categoryRequestsRef.current.clear();
       if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
       console.log('[Home] 🧹 GC: Released rail data & thumbnails');
     }, []),
@@ -116,7 +295,34 @@ function HomeScreenInner() {
     }, []),
   });
 
-  // Fetch watch history & progress from Firestore + local SQLite
+  const prefetchUrls = useMemo(() => {
+    if (isKids) return [] as string[];
+
+    const urls: string[] = [];
+    const seen = new Set<string>();
+
+    const add = (url?: string) => {
+      if (!url) return;
+      if (seen.has(url)) return;
+      seen.add(url);
+      urls.push(url);
+    };
+
+    for (const v of (railData["Hero"] || []).slice(0, 5)) add(v.thumbnail);
+    for (const v of continueWatching.slice(0, 12)) add(v.thumbnail);
+    for (const cat of CATEGORIES.slice(0, 4)) {
+      for (const v of (railData[cat.label] || []).slice(0, 6)) add(v.thumbnail);
+    }
+
+    return urls;
+  }, [isKids, railData, continueWatching]);
+
+  useEffect(() => {
+    if (prefetchUrls.length > 0) {
+      void Image.prefetch(prefetchUrls).catch(() => undefined);
+    }
+  }, [prefetchUrls]);
+
   useEffect(() => {
     if (isKids) return;
     let cancelled = false;
@@ -130,7 +336,6 @@ function HomeScreenInner() {
 
         if (cancelled) return;
 
-        // Merge local SQLite progress into the Firestore map
         const mergedMap = new Map(firestoreProgress);
         (localHistory as any[]).forEach((row: any) => {
           if (row.id && row.duration > 0 && !mergedMap.has(row.id)) {
@@ -139,7 +344,6 @@ function HomeScreenInner() {
         });
         setProgressMap(mergedMap);
 
-        // Continue Watching: prefer Firestore, fallback to local
         if (firestoreCW.length > 0) {
           setContinueWatching(firestoreCW as Video[]);
         } else if (localHistory.length > 0) {
@@ -168,9 +372,8 @@ function HomeScreenInner() {
     async function fetchData() {
       if (isKids) return;
       setLoading(true);
-      
+
       try {
-        // Fetch Trending (KE) and Home in parallel for speed
         const [trending, home] = await Promise.all([
           safeFetch(() => youtubeService.getTrending(), [] as Video[], 'Trending'),
           safeFetch(() => youtubeService.getHomeVideos(), [] as Video[], 'Home')
@@ -178,30 +381,28 @@ function HomeScreenInner() {
 
         if (cancelled) return;
 
-        const newData: Record<string, Video[]> = { ...railData };
+        const updates: Record<string, Video[]> = {};
 
         if (trending.length > 0) {
-          newData["Trending"] = trending;
-          newData["Hero"] = trending.slice(0, 10);
-        }
-        
-        newData["Recommended"] = home.length > 0 ? home : FALLBACK_VIDEOS;
-        // Fallback hero if trending failed
-        if (!newData["Hero"]) {
-          newData["Hero"] = home.length > 0 ? home.slice(0, 5) : FALLBACK_VIDEOS.slice(0, 5);
+          updates["Trending"] = trending;
+          updates["Hero"] = trending.slice(0, 10);
         }
 
-        setRailData(newData);
+        updates["Recommended"] = home.length > 0 ? home : FALLBACK_VIDEOS;
+        if (!updates["Hero"]) {
+          updates["Hero"] = home.length > 0 ? home.slice(0, 5) : FALLBACK_VIDEOS.slice(0, 5);
+        }
+
+        setRailData(prev => mergeRailData(prev, updates));
       } finally {
         setLoading(false);
       }
 
-      // Fetch other categories in background
       for (const cat of CATEGORIES.slice(2)) {
         if (cancelled) return;
         const videos = await safeFetch(() => youtubeService.getVideosByCategory(cat.label), [] as Video[], cat.label);
         if (!cancelled && videos.length > 0) {
-          setRailData(prev => ({ ...prev, [cat.label]: videos }));
+          setRailData(prev => mergeRailData(prev, { [cat.label]: videos }));
           await new Promise(r => setTimeout(r, 600));
         }
       }
@@ -210,124 +411,93 @@ function HomeScreenInner() {
     return () => { cancelled = true; };
   }, [isKids, gcCycle]);
 
+  useEffect(() => {
+    if (isKids || activeCategory === 'Recommended' || railData[activeCategory]?.length > 0) return;
+    if (categoryRequestsRef.current.has(activeCategory)) return;
+
+    let cancelled = false;
+    categoryRequestsRef.current.add(activeCategory);
+
+    async function fetchSelectedCategory() {
+      const videos = activeCategory === 'Trending'
+        ? await safeFetch(() => youtubeService.getTrending(), [] as Video[], 'Trending')
+        : await safeFetch(() => youtubeService.getVideosByCategory(activeCategory), [] as Video[], activeCategory);
+
+      if (!cancelled && videos.length > 0) {
+        setRailData(prev => mergeRailData(prev, {
+          [activeCategory]: videos,
+          Hero: videos.slice(0, 10),
+        }));
+      }
+    }
+
+    fetchSelectedCategory();
+    return () => { cancelled = true; };
+  }, [activeCategory, isKids, railData, gcCycle]);
+
   const handleFocusThumbnail = useCallback((thumbnail: string | null) => {
     if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
     focusTimerRef.current = setTimeout(() => {
-      setFocusedThumbnail(thumbnail);
       setAmbientState(thumbnail, '#FFFFFF');
-    }, 300); // 300ms settle time
+    }, 300);
   }, [setAmbientState]);
 
-  const heroVideo = useMemo(() => railData["Hero"]?.[0] || null, [railData]);
+  const handleSelectCategory = useCallback((label: string) => {
+    setActiveCategory(label);
+  }, []);
+
+  const visibleCategories = useMemo(() => {
+    if (activeCategory === 'Recommended') return CATEGORIES;
+    return CATEGORIES.filter(category => category.label === activeCategory);
+  }, [activeCategory]);
+
+  const heroVideos = useMemo(() => {
+    if (activeCategory === 'Recommended') return railData["Hero"];
+    return railData[activeCategory] || railData["Hero"];
+  }, [activeCategory, railData]);
 
   const renderHeader = useCallback(() => (
-    <View>
-      {/* ── Instant Hero Section (Borderless) ── */}
-      <View>
-        {railData["Hero"] && railData["Hero"].length > 0 ? (
-          <Animated.View entering={FadeIn.duration(800)}>
-            <HeroBanner 
-              title={railData["Hero"][0].title}
-              description={railData["Hero"][0].channel}
-              thumbnail={railData["Hero"][0].thumbnail}
-              videos={railData["Hero"]}
-            />
-          </Animated.View>
-        ) : (
-          <View style={{ height: 600 }} className="w-full bg-white/5 items-center justify-center">
-            <Zap size={48} color="rgba(255,255,255,0.1)" />
-          </View>
-        )}
-      </View>
-      
-      {/* ── Premium Category Chips with Horizontal Edge Fade ── */}
-      <View style={{ marginBottom: 40, position: 'relative' }}>
-        <FlatList
-          horizontal
-          data={CATEGORIES}
-          keyExtractor={(item) => item.label}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 24 }}
-          renderItem={({ item, index }) => (
-            <FocusablePressable
-              className="flex-row items-center bg-white/5 rounded-3xl mr-4"
-              focusedClassName="bg-white scale-110 shadow-2xl shadow-white/20"
-              style={{ paddingHorizontal: 28, paddingVertical: 16, gap: 12 }}
-            >
-              {({ isFocused }) => (
-                <>
-                  <item.icon size={24} color={isFocused ? 'black' : item.color} />
-                  <Text className="font-black text-2xl" style={{ color: isFocused ? 'black' : 'white' }}>{item.label}</Text>
-                </>
-              )}
-            </FocusablePressable>
-          )}
-        />
-        {/* Left Fade */}
-        <LinearGradient
-          colors={['#0A0A0A', 'transparent']}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 40, zIndex: 10, pointerEvents: 'none' }}
-        />
-        {/* Right Fade */}
-        <LinearGradient
-          colors={['transparent', '#0A0A0A']}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 40, zIndex: 10, pointerEvents: 'none' }}
-        />
-      </View>
-
-      {/* ── Continue Watching Rail (Firestore-powered) ── */}
-      {continueWatching.length > 0 && (
-        <Animated.View entering={FadeInDown.duration(600)}>
-          <HorizontalRail
-            title="Continue Watching"
-            videos={continueWatching}
-            onFocusVideo={handleFocusThumbnail}
-            progressMap={progressMap}
-          />
-        </Animated.View>
-      )}
-    </View>
-  ), [heroVideo, continueWatching, progressMap, handleFocusThumbnail]);
+    <HomeHeader
+      heroVideos={heroVideos}
+      continueWatching={continueWatching}
+      progressMap={progressMap}
+      activeCategory={activeCategory}
+      onSelectCategory={handleSelectCategory}
+      onFocusVideo={handleFocusThumbnail}
+    />
+  ), [heroVideos, continueWatching, progressMap, activeCategory, handleSelectCategory, handleFocusThumbnail]);
 
   const renderRail = useCallback(({ item: cat }: { item: typeof CATEGORIES[0] }) => {
-    const videos = railData[cat.label];
-    if (!videos || videos.length === 0) return null;
     return (
-      <View className="mb-8">
-        <HorizontalRail
-          title={cat.label}
-          videos={videos}
-          onFocusVideo={handleFocusThumbnail}
-          progressMap={progressMap}
-        />
-      </View>
+      <MemoizedRail
+        title={cat.label}
+        videos={railData[cat.label]}
+        progressMap={progressMap}
+        onFocusVideo={handleFocusThumbnail}
+      />
     );
-  }, [railData, handleFocusThumbnail, progressMap]);
+  }, [railData, progressMap, handleFocusThumbnail]);
 
   if (isKids) return <KidsHomeScreen />;
 
-  if (loading && Object.keys(railData).length === 0) {
+  if (loading && !railData["Hero"]) {
     return <SingularityLoader />;
   }
 
   return (
     <View style={{ flex: 1, backgroundColor: '#0A0A0A' }}>
       <FlatList
-        data={CATEGORIES}
+        data={visibleCategories}
         keyExtractor={(item) => item.label}
         renderItem={renderRail}
         ListHeaderComponent={renderHeader}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 100 }}
         initialNumToRender={2}
-        windowSize={5}
+        windowSize={3}
         maxToRenderPerBatch={2}
-        updateCellsBatchingPeriod={100}
-        removeClippedSubviews={true}
+        updateCellsBatchingPeriod={150}
+        removeClippedSubviews={false}
       />
     </View>
   );

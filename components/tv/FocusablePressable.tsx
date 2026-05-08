@@ -14,18 +14,19 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-interface FocusablePressableProps extends Omit<PressableProps, 'children'> {
+interface FocusablePressableProps extends Omit<PressableProps, 'children' | 'nextFocusUp' | 'nextFocusDown' | 'nextFocusLeft' | 'nextFocusRight'> {
   children: React.ReactNode | ((state: { isFocused: boolean; pressed: boolean; isPressed: boolean }) => React.ReactNode);
   className?: string;
   focusedClassName?: string;
   activeScale?: number;
   // TV Remote navigation helpers
-  nextFocusUp?: number;
-  nextFocusDown?: number;
-  nextFocusLeft?: number;
-  nextFocusRight?: number;
+  nextFocusUp?: number | string;
+  nextFocusDown?: number | string;
+  nextFocusLeft?: number | string;
+  nextFocusRight?: number | string;
   hasTVPreferredFocus?: boolean;
   nativeID?: string;
+  focusable?: boolean;
 }
 
 export function FocusablePressable({
@@ -40,6 +41,7 @@ export function FocusablePressable({
   nextFocusRight,
   hasTVPreferredFocus,
   nativeID,
+  focusable = true,
   ...props
 }: FocusablePressableProps) {
   const [isFocused, setIsFocused] = useState(false);
@@ -94,11 +96,12 @@ export function FocusablePressable({
         )}
         style={style}
         // TV remote navigation props
-        {...(nextFocusUp !== undefined && { nextFocusUp })}
-        {...(nextFocusDown !== undefined && { nextFocusDown })}
-        {...(nextFocusLeft !== undefined && { nextFocusLeft })}
-        {...(nextFocusRight !== undefined && { nextFocusRight })}
+        {...(nextFocusUp !== undefined && { nextFocusUp: nextFocusUp as any })}
+        {...(nextFocusDown !== undefined && { nextFocusDown: nextFocusDown as any })}
+        {...(nextFocusLeft !== undefined && { nextFocusLeft: nextFocusLeft as any })}
+        {...(nextFocusRight !== undefined && { nextFocusRight: nextFocusRight as any })}
         {...(hasTVPreferredFocus !== undefined && { hasTVPreferredFocus })}
+        focusable={focusable}
         {...props}
       >
         {(state) => (

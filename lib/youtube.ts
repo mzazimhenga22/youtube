@@ -76,6 +76,47 @@ export class YouTubeService {
         }
     }
 
+    async getKidsHome(): Promise<Video[]> {
+        try {
+            // Using a mix of popular kids categories for a diverse home feed
+            const queries = ['nursery rhymes', 'kids shows full episodes', 'educational cartoons', 'disney junior clips'];
+            const results = await Promise.all(queries.map(q => this.search(q)));
+            
+            // Flatten, shuffle and filter
+            return results.flat()
+                .filter((v, i, self) => self.findIndex(t => t.id === v.id) === i)
+                .sort(() => Math.random() - 0.5)
+                .slice(0, 24);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    async getKidsCategory(category: string): Promise<Video[]> {
+        const categoryMap: Record<string, string> = {
+            'shows': 'kids animated shows full episodes',
+            'learning': 'educational videos for kids science math',
+            'music': 'nursery rhymes songs for children',
+            'explore': 'animal facts for kids adventure',
+            'play': 'kids toy reviews fun activities',
+            'watch': 'popular kids cartoons',
+            'listen': 'calming music for kids lullabies'
+        };
+        
+        const query = categoryMap[category.toLowerCase()] || `${category} for kids`;
+        return this.search(query);
+    }
+
+    async getKidsUpNext(videoId: string): Promise<Video[]> {
+        const related = await this.getRelatedVideos({ id: videoId, title: '', channel: '', views: '', thumbnail: '', duration: '' });
+        // Ensure they are actually kids friendly by adding a fallback if empty or too few
+        if (related.length < 5) {
+            const kidsHome = await this.getKidsHome();
+            return [...related, ...kidsHome].slice(0, 10);
+        }
+        return related;
+    }
+
     async getStream(videoId: string): Promise<{ url: string; mimeType?: string } | null> {
         try {
             await this.ensureCredentials();
@@ -179,7 +220,7 @@ export class YouTubeService {
                     if (data.playabilityStatus?.status === 'OK' && data.streamingData) {
                         const stream = this.extractStream(data);
                         if (stream) {
-                            console.log(`[YouTubeService] Found stream using client: ${client.name}`);
+                            console.log(`[YouTubeService] Found stream using client: ${client.name} (${stream.adaptive ? 'Adaptive' : 'Progressive'})`);
                             return stream;
                         }
                     } else {
@@ -279,28 +320,69 @@ export class YouTubeService {
         return chapters.sort((a, b) => a.time - b.time);
     }
 
-    private extractStream(data: any): { url: string; mimeType: string } | null {
+    private extractStream(data: any): { url: string; mimeType: string; adaptive?: boolean } | null {
         const streamingData = data.streamingData || {};
         
-        // For Live Streams, always prefer HLS manifest if available
+        // 1. Prefer HLS Manifest (Adaptive Quality)
+        // This is the best for "highest quality based on network" as the player handles switching.
         if (streamingData.hlsManifestUrl) {
             return { 
                 url: streamingData.hlsManifestUrl, 
-                mimeType: 'application/x-mpegURL' 
+                mimeType: 'application/x-mpegURL',
+                adaptive: true
             };
         }
 
-        const formats = [...(streamingData.formats || []), ...(streamingData.adaptiveFormats || [])];
+        // 2. Dash Manifest (Alternative Adaptive Quality)
+        if (streamingData.dashManifestUrl) {
+            return {
+                url: streamingData.dashManifestUrl,
+                mimeType: 'application/dash+xml',
+                adaptive: true
+            };
+        }
+
+        // 3. Progressive Fallback (Pick highest quality muxed stream)
+        const formats = streamingData.formats || [];
         
-        // Filter out formats without direct URLs (those with signatureCipher need JS decryption)
-        const playableFormats = formats.filter((f: any) => f.url && !f.signatureCipher);
-        
-        // Prefer muxed mp4 streams for better compatibility on TV (includes audio)
-        const best = playableFormats.find((f: any) => 
-            f.mimeType?.includes('video/mp4') && (f.audioQuality || f.audioSampleRate)
-        ) || playableFormats.find((f: any) => f.mimeType?.includes('video/mp4')) || playableFormats[0];
-        
-        return best ? { url: best.url, mimeType: best.mimeType } : null;
+        // Filter for formats with direct URLs and muxed content (Audio + Video)
+        const muxedFormats = formats.filter((f: any) => 
+            f.url && 
+            !f.signatureCipher && 
+            f.mimeType?.includes('video/mp4') &&
+            f.width &&
+            f.height &&
+            (f.audioQuality || f.audioSampleRate)
+        );
+
+        if (muxedFormats.length > 0) {
+            // Sort by bitrate descending to get highest quality
+            muxedFormats.sort((a: any, b: any) => {
+                const bRes = (b.width || 0) * (b.height || 0);
+                const aRes = (a.width || 0) * (a.height || 0);
+                if (bRes !== aRes) return bRes - aRes;
+                return (b.bitrate || 0) - (a.bitrate || 0);
+            });
+
+            const best = muxedFormats[0];
+            return { 
+                url: best.url, 
+                mimeType: best.mimeType,
+                adaptive: false
+            };
+        }
+
+        // Last resort: any playable video format. Never return audio-only formats,
+        // because they produce sound with a black VideoView.
+        const fallbackFormats = [...formats, ...(streamingData.adaptiveFormats || [])];
+        const anyPlayable = fallbackFormats.find((f: any) =>
+            f.url &&
+            !f.signatureCipher &&
+            f.mimeType?.startsWith('video/') &&
+            f.width &&
+            f.height
+        );
+        return anyPlayable ? { url: anyPlayable.url, mimeType: anyPlayable.mimeType, adaptive: false } : null;
     }
 
     async getUpNext(videoId: string): Promise<Video[]> {

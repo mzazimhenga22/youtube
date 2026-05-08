@@ -10,12 +10,48 @@ const PlayerContext = createContext<PlayerContextType | null>(null);
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const { globalStreamUrl, isGlobalPlaying, setGlobalPlaying } = useAppStore();
+  const activeSourceRef = useRef<string | null>(null);
+  const isReplacingRef = useRef(false);
   
   // Create the SINGLE global player instance
-  const player = useVideoPlayer(globalStreamUrl || '', (p) => {
+  const player = useVideoPlayer(null, (p) => {
     p.loop = false;
     p.volume = 1.0;
+    p.timeUpdateEventInterval = 0.5;
   });
+
+  // Handle source changes
+  useEffect(() => {
+    let cancelled = false;
+
+    async function replaceSource() {
+      if (activeSourceRef.current === globalStreamUrl) return;
+      activeSourceRef.current = globalStreamUrl;
+      isReplacingRef.current = true;
+
+      if (!globalStreamUrl) {
+        try { player.pause(); } catch {}
+        try { await player.replaceAsync(null); } catch {}
+        isReplacingRef.current = false;
+        return;
+      }
+
+      await player.replaceAsync(globalStreamUrl);
+      isReplacingRef.current = false;
+      if (!cancelled && isGlobalPlaying) {
+        player.play();
+      }
+    }
+
+    replaceSource().catch((error) => {
+      console.warn('[PlayerProvider] Failed to replace source:', error);
+      isReplacingRef.current = false;
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [globalStreamUrl, isGlobalPlaying, player]);
 
   // Keep playback status in sync with store
   useEffect(() => {
@@ -26,13 +62,26 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isGlobalPlaying, player]);
 
-  // Sync back player status to store (optional but good for consistency)
+  // Sync back player status and progress to store
   useEffect(() => {
-    const sub = player.addListener('playingChange', ({ isPlaying }) => {
+    const { setGlobalPlaying, setGlobalProgress } = useAppStore.getState();
+    
+    const statusSub = player.addListener('playingChange', ({ isPlaying }) => {
+      if (isReplacingRef.current || !activeSourceRef.current) return;
       setGlobalPlaying(isPlaying);
     });
-    return () => sub.remove();
-  }, [player, setGlobalPlaying]);
+
+    const timeSub = player.addListener('timeUpdate', (event) => {
+      if (player.duration > 0) {
+        setGlobalProgress(event.currentTime / player.duration);
+      }
+    });
+
+    return () => {
+      statusSub.remove();
+      timeSub.remove();
+    };
+  }, [player]);
 
   return (
     <PlayerContext.Provider value={{ player }}>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, Image } from 'react-native';
 import { FocusablePressable } from '@/components/tv/FocusablePressable';
 import { 
@@ -20,7 +20,7 @@ import {
 import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
 import { useAppStore } from '@/lib/store';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 
 const categories = [
   { id: 'account', label: 'Account', icon: User, description: 'Manage your profiles, members, and connected accounts.' },
@@ -35,8 +35,8 @@ const categories = [
 const getSettingsContent = (profile: any): Record<string, any[]> => ({
   account: [
     { label: profile?.name || 'Guest', value: profile?.handle || 'Not signed in', isProfile: true, avatar: profile?.avatar },
-    { label: 'Switch profile', value: 'Change who is watching' },
-    { label: 'Add account', value: 'Sign in to another YouTube account' },
+    { label: 'Switch profile', value: 'Change who is watching', action: 'switchProfile' },
+    { label: 'Add account', value: 'Sign in to another YouTube account', action: 'addAccount' },
   ],
   playback: [
     { label: 'Autoplay', value: 'On (recommended)' },
@@ -52,8 +52,23 @@ const getSettingsContent = (profile: any): Record<string, any[]> => ({
 });
 
 export default function SettingsScreen() {
-  const [activeCategory, setActiveCategory] = useState('account');
+  const params = useLocalSearchParams<{ section?: string }>();
+  const [activeCategory, setActiveCategory] = useState(params.section || 'account');
   const { currentProfile, logout } = useAppStore();
+
+  useEffect(() => {
+    if (params.section) setActiveCategory(params.section);
+  }, [params.section]);
+
+  const openProfilePicker = (openAuth = false) => {
+    router.replace({
+      pathname: '/',
+      params: {
+        skipSplash: '1',
+        ...(openAuth ? { auth: '1' } : {}),
+      },
+    });
+  };
 
   const handleLogout = async () => {
     try {
@@ -62,7 +77,17 @@ export default function SettingsScreen() {
       console.error('Firebase SignOut Error', e);
     }
     logout();
-    router.replace('/');
+    openProfilePicker();
+  };
+
+  const handleSettingItemPress = (item: any) => {
+    if (item.action === 'switchProfile') {
+      openProfilePicker();
+      return;
+    }
+    if (item.action === 'addAccount') {
+      openProfilePicker(true);
+    }
   };
 
   const settingsContent = getSettingsContent(currentProfile);
@@ -126,6 +151,7 @@ export default function SettingsScreen() {
             {(settingsContent[activeCategory] || []).map((item: any, index: number) => (
               <FocusablePressable
                 key={index}
+                onPress={() => handleSettingItemPress(item)}
                 className="bg-white/5 p-8 rounded-[32px] flex-row items-center justify-between border-2 border-transparent"
                 focusedClassName="bg-white"
                 activeScale={1.03}
@@ -135,7 +161,13 @@ export default function SettingsScreen() {
                     <View className="flex-row items-center">
                       {item.isProfile && (
                         <View className="w-12 h-12 rounded-full bg-zinc-800 mr-6 overflow-hidden border-2 border-white/20">
-                          <Image source={{ uri: item.avatar || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y' }} className="w-full h-full" />
+                          <Image 
+                            source={typeof (item.avatar || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y') === 'string' 
+                              ? { uri: item.avatar || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y' } 
+                              : item.avatar
+                            } 
+                            className="w-full h-full" 
+                          />
                         </View>
                       )}
                       <View>

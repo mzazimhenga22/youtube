@@ -1,18 +1,17 @@
 import React, { useEffect, useState, useRef, useCallback, memo, useMemo } from 'react';
-import { View, Text, FlatList, ActivityIndicator, useWindowDimensions, StyleSheet, Image } from 'react-native';
+import { View, Text, FlatList, useWindowDimensions, StyleSheet, Image } from 'react-native';
 import { youtubeService, Video } from '@/lib/youtube';
 import { useAppStore } from '@/lib/store';
 import { FocusablePressable } from '@/components/tv/FocusablePressable';
-import { Play, Music2, Disc3, TrendingUp, Sparkles, Radio, Mic2, Shuffle } from 'lucide-react-native';
+import { Play, Disc3, TrendingUp, Sparkles, Radio, Shuffle } from 'lucide-react-native';
 import { SingularityLoader } from '@/components/tv/SingularityLoader';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useVideoPlayer, VideoView } from 'expo-video';
-import { router } from 'expo-router';
+import { VideoView } from 'expo-video';
+import { useGlobalPlayer } from '@/lib/PlayerContext';
+import { playVideo } from '@/lib/navigation';
 import { useIsFocused } from '@react-navigation/native';
 import Animated, {
   useAnimatedStyle, useSharedValue, withTiming, Easing,
-  withDelay,
-  FadeInUp,
   FadeIn,
   withRepeat,
   withSequence,
@@ -60,323 +59,112 @@ const MusicVisualizerBg = memo(() => {
   );
 });
 
-export default function MusicScreen() {
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const isCompact = screenWidth < 768;
+// ── Memoized Components for TV Performance ──
 
-  const [musicData, setMusicData] = useState<Record<string, Video[]>>({});
-  const [loading, setLoading] = useState(true);
-  const [focusedVideo, setFocusedVideo] = useState<Video | null>(null);
-  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
-  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastFocusedIdRef = useRef<string | null>(null);
-  const [gcCycle, setGcCycle] = useState(0);
+const CategoryChip = memo(({ item }: { item: typeof MUSIC_CATEGORIES[0] }) => {
+  const Icon = item.icon;
+  return (
+    <FocusablePressable
+      className="flex-row items-center bg-white/5 rounded-3xl mr-4"
+      focusedClassName="bg-white scale-110 shadow-2xl shadow-white/20"
+      style={{ paddingHorizontal: 24, paddingVertical: 14, gap: 10 }}
+    >
+      {({ isFocused }) => (
+        <>
+          <Icon size={22} color={isFocused ? 'black' : item.color} />
+          <Text className="font-black text-xl" style={{ color: isFocused ? 'black' : 'white' }}>
+            {item.label}
+          </Text>
+        </>
+      )}
+    </FocusablePressable>
+  );
+}, (prev, next) => prev.item.label === next.item.label);
 
-  const { 
-    globalVideo, 
-    globalStreamUrl, 
-    isGlobalPlaying,
-    setGlobalPlayback, 
-    setGlobalPlaying,
-    setAmbientState
-  } = useAppStore();
+const MemoizedCategoryRail = memo(({ isCompact }: { isCompact: boolean }) => (
+  <View style={{ marginBottom: 40, position: 'relative' }}>
+    <FlatList
+      horizontal
+      data={MUSIC_CATEGORIES}
+      keyExtractor={(item) => item.label}
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={{ paddingHorizontal: isCompact ? 16 : 24 }}
+      initialNumToRender={5}
+      windowSize={5}
+      removeClippedSubviews={false} // Prevent TV focus loss
+      renderItem={({ item }) => <CategoryChip item={item} />}
+    />
+    <LinearGradient
+      colors={['#050505', 'transparent']}
+      start={{ x: 0, y: 0.5 }}
+      end={{ x: 1, y: 0.5 }}
+      style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 60, zIndex: 10, pointerEvents: 'none' }}
+    />
+    <LinearGradient
+      colors={['transparent', '#050505']}
+      start={{ x: 0, y: 0.5 }}
+      end={{ x: 1, y: 0.5 }}
+      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 60, zIndex: 10, pointerEvents: 'none' }}
+    />
+  </View>
+));
 
-  const bgOpacity = useSharedValue(0);
-  const videoOpacity = useSharedValue(0);
-
-  // ── Screen Garbage Collector ──
-  useScreenGC('Music', {
-    delayMs: 25_000,
-    onCleanup: useCallback(() => {
-      setMusicData({});
-      setFocusedVideo(null);
-      setIsPreviewPlaying(false);
-      setLoading(true);
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-      console.log('[Music] 🧹 GC: Released music data & preview');
-    }, []),
-    onReactivate: useCallback(() => {
-      setGcCycle(c => c + 1);
-      console.log('[Music] ♻️ GC: Re-fetching data');
-    }, []),
-  });
-
-  const isFocused = useIsFocused();
-
-  // The player now lives in the Modal or is shared.
-  // For the Music screen preview, we still use useVideoPlayer but with global sync.
-  const player = useVideoPlayer(globalStreamUrl || '', (p) => {
-    p.loop = true;
-    p.volume = 0.2;
-    if (globalStreamUrl) p.play();
-  });
-
-  // Keep global playing state in sync with local preview
-  useEffect(() => {
-    if (isFocused && isPreviewPlaying) {
-      setGlobalPlaying(true);
-    }
-  }, [isFocused, isPreviewPlaying]);
-
-  // Stop preview when leaving
-  useEffect(() => {
-    if (!isFocused) {
-      setIsPreviewPlaying(false);
-      videoOpacity.value = withTiming(0, { duration: 200 });
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-    }
-  }, [isFocused]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchData() {
-      try {
-        const [home, trending, relax, workout] = await Promise.all([
-          youtubeService.getVideosByCategory('Official Music Videos'),
-          youtubeService.getVideosByCategory('Trending music'),
-          youtubeService.getVideosByCategory('Lofi hip hop relax'),
-          youtubeService.getVideosByCategory('High energy workout music'),
-        ]);
-
-        if (cancelled) return;
-
-        const data: Record<string, Video[]> = {
-          "Your Favorites": home,
-          "Trending Now": trending,
-          "Relaxing Vibes": relax,
-          "Energy Boost": workout,
-        };
-
-        setMusicData(data);
-        if (home.length > 0) setFocusedVideo(home[0]);
-        setLoading(false);
-      } catch (error) {
-        console.error('[MusicScreen] Fetch error:', error);
-        if (!cancelled) setLoading(false);
-      }
-    }
-    fetchData();
-    return () => { 
-      cancelled = true;
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-    };
-  }, [gcCycle]);
-
-  const handleCardFocus = useCallback((video: Video) => {
-    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-    
-    previewTimerRef.current = setTimeout(async () => {
-      setFocusedVideo(video);
-      bgOpacity.value = withTiming(1, { duration: 800, easing: Easing.out(Easing.ease) });
-      videoOpacity.value = withTiming(0, { duration: 300 });
-      setIsPreviewPlaying(false);
-      
-      // Header Inheritance
-      setAmbientState(video.thumbnail, '#FF0055');
-
-      // Only fetch stream preview if screen is still focused
-      if (!isFocused) return;
-      try {
-        const stream = await youtubeService.getStream(video.id);
-        if (stream && lastFocusedIdRef.current === video.id && isFocused) {
-          setGlobalPlayback(video, stream.url);
-          setIsPreviewPlaying(true);
-          videoOpacity.value = withTiming(1, { duration: 1500, easing: Easing.out(Easing.ease) });
-        }
-      } catch {}
-    }, 800); // Longer throttle to reduce stream fetches
-
-    lastFocusedIdRef.current = video.id;
-  }, [setAmbientState, isFocused, setGlobalPlayback]);
-
-  const bgAnimStyle = useAnimatedStyle(() => ({ opacity: bgOpacity.value }));
-  const videoAnimStyle = useAnimatedStyle(() => ({ opacity: videoOpacity.value }));
-
-  const renderHeader = useCallback(() => (
-    <View>
-      {/* Dynamic Hero Section */}
-      <View style={{ height: 560, paddingHorizontal: isCompact ? 16 : 32, paddingTop: 40, justifyContent: 'center' }}>
-        {focusedVideo && (
-           <Animated.View entering={FadeIn.duration(1000)}>
-              <Text className="text-red-600 font-black tracking-widest text-2xl mb-4 uppercase">
-                Music World
-              </Text>
-              <Text 
-                className="text-white font-black tracking-tighter mb-4" 
-                style={{ fontSize: isCompact ? 32 : 64, lineHeight: isCompact ? 38 : 72 }}
-                numberOfLines={2}
-              >
-                {focusedVideo.title}
-              </Text>
-              <View className="flex-row items-center mb-10" style={{ gap: 12 }}>
-                 <View className="bg-white/10 px-4 py-2 rounded-full border border-white/10">
-                    <Text className="text-zinc-400 font-bold text-lg">{focusedVideo.channel}</Text>
-                 </View>
-                 <Text className="text-zinc-500 font-bold text-lg">{focusedVideo.views} listeners</Text>
-              </View>
-
-              <View className="flex-row" style={{ gap: 16 }}>
-                 <FocusablePressable 
-                    className="bg-white px-10 py-5 rounded-2xl flex-row items-center"
-                    focusedClassName="bg-red-600 scale-110 shadow-2xl shadow-red-600/30"
-                     onPress={() => {
-                       // We don't kill the preview because we want the Modal to pick it up!
-                       if (focusedVideo) {
-                         router.push({ 
-                           pathname: '/modal', 
-                           params: { ...focusedVideo, type: 'music' } as any 
-                         });
-                       }
-                     }}
-                 >
-                    {({ isFocused }) => (
-                       <>
-                          <Play size={28} color={isFocused ? 'white' : 'black'} fill={isFocused ? 'white' : 'black'} />
-                          <Text className={`font-black text-2xl ml-3 ${isFocused ? 'text-white' : 'text-black'}`}>Listen Now</Text>
-                       </>
-                    )}
-                 </FocusablePressable>
-                 <FocusablePressable 
-                    className="bg-white/10 px-10 py-5 rounded-2xl flex-row items-center"
-                    focusedClassName="bg-white/20 scale-110"
-                 >
-                    <Shuffle size={28} color="white" />
-                    <Text className="text-white font-black text-2xl ml-3">Mix</Text>
-                 </FocusablePressable>
-              </View>
-           </Animated.View>
-        )}
-      </View>
-
-      {/* Categories with Horizontal Edge Fade */}
-      <View style={{ marginBottom: 40, position: 'relative' }}>
-        <FlatList
-          horizontal
-          data={MUSIC_CATEGORIES}
-          keyExtractor={(item) => item.label}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: isCompact ? 16 : 24 }}
-          renderItem={({ item }) => (
-            <FocusablePressable
-              className="flex-row items-center bg-white/5 rounded-3xl mr-4"
-              focusedClassName="bg-white scale-110 shadow-2xl shadow-white/20"
-              style={{ paddingHorizontal: 24, paddingVertical: 14, gap: 10 }}
-            >
-              {({ isFocused }) => (
-                <>
-                  <item.icon size={22} color={isFocused ? 'black' : item.color} />
-                  <Text className="font-black text-xl" style={{ color: isFocused ? 'black' : 'white' }}>
-                    {item.label}
-                  </Text>
-                </>
-              )}
-            </FocusablePressable>
-          )}
-        />
-        {/* Left Fade */}
-        <LinearGradient
-          colors={['#050505', 'transparent']}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 60, zIndex: 10, pointerEvents: 'none' }}
-        />
-        {/* Right Fade */}
-        <LinearGradient
-          colors={['transparent', '#050505']}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 60, zIndex: 10, pointerEvents: 'none' }}
-        />
-      </View>
-    </View>
-  ), [focusedVideo, isCompact]);
-
-  const renderRail = useCallback(({ item: [title, videos] }: { item: [string, Video[]], index: number }) => {
-    const isSquare = title === "Your Favorites" || title === "Relaxing Vibes";
-    const cardSize = isSquare ? (isCompact ? 220 : 300) : (isCompact ? 320 : 420);
-    
-    return (
-      <View className="mb-14">
-        <View style={{ paddingHorizontal: isCompact ? 16 : 48, marginBottom: 16 }}>
-          <Text className="text-white text-3xl font-black tracking-tight">{title}</Text>
-        </View>
-        <FlatList
-          horizontal
-          data={videos}
-          keyExtractor={(v, i) => `${v.id}-${i}`}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: isCompact ? 16 : 48, gap: 20 }}
-          renderItem={({ item }) => (
-            <MusicCard 
-              video={item} 
-              isSquare={isSquare} 
-              size={cardSize}
-              onFocus={() => handleCardFocus(item)}
-              onPress={() => {
-                // Just push to modal, modal will see global playback and resume
-                router.push({ 
-                  pathname: '/modal', 
-                  params: { ...item, type: 'music' } as any 
-                });
-              }}
-            />
-          )}
-          initialNumToRender={4}
-          windowSize={5}
-          maxToRenderPerBatch={4}
-          removeClippedSubviews={true}
-        />
-      </View>
-    );
-  }, [handleCardFocus, isCompact]);
-
-  if (loading && Object.keys(musicData).length === 0) {
-    return <SingularityLoader />;
+const MemoizedMusicHero = memo(({ focusedVideo, isCompact }: { focusedVideo: Video | null, isCompact: boolean }) => {
+  if (!focusedVideo) {
+    return <View style={{ height: 560 }} />;
   }
 
   return (
-    <View className="flex-1 bg-[#050505]">
-      {/* ── AMBIENT LAYERS ── */}
-      <MusicVisualizerBg />
-      
-      {focusedVideo && (
-        <Animated.View style={[StyleSheet.absoluteFill, bgAnimStyle]}>
-          <Image 
-            source={{ uri: focusedVideo.thumbnail || `https://img.youtube.com/vi/${focusedVideo.id}/maxresdefault.jpg` }} 
-            style={StyleSheet.absoluteFill} 
-            resizeMode="cover" 
-          />
-          <LinearGradient colors={['transparent', 'rgba(5,5,5,0.6)', '#050505']} style={StyleSheet.absoluteFill} />
-        </Animated.View>
-      )}
+    <View style={{ height: 560, paddingHorizontal: isCompact ? 16 : 32, paddingTop: 40, justifyContent: 'center' }}>
+      <Animated.View entering={FadeIn.duration(1000)}>
+        <Text className="text-red-600 font-black tracking-widest text-2xl mb-4 uppercase">
+          Music World
+        </Text>
+        <Text
+          className="text-white font-black tracking-tighter mb-4"
+          style={{ fontSize: isCompact ? 32 : 64, lineHeight: isCompact ? 38 : 72 }}
+          numberOfLines={2}
+        >
+          {focusedVideo.title}
+        </Text>
+        <View className="flex-row items-center mb-10" style={{ gap: 12 }}>
+            <View className="bg-white/10 px-4 py-2 rounded-full border border-white/10">
+              <Text className="text-zinc-400 font-bold text-lg">{focusedVideo.channel}</Text>
+            </View>
+            <Text className="text-zinc-500 font-bold text-lg">{focusedVideo.views} listeners</Text>
+        </View>
 
-      {isFocused && isPreviewPlaying && globalStreamUrl && (
-        <Animated.View style={[StyleSheet.absoluteFill, videoAnimStyle]}>
-          <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
-          <LinearGradient colors={['rgba(5,5,5,0.3)', 'rgba(5,5,5,0.7)', '#050505']} style={StyleSheet.absoluteFill} />
-        </Animated.View>
-      )}
-
-      {/* ── CONTENT ── */}
-      <FlatList
-        data={Object.entries(musicData)}
-        keyExtractor={(item) => item[0]}
-        renderItem={renderRail}
-        ListHeaderComponent={renderHeader}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 100 }}
-        initialNumToRender={2}
-        windowSize={5}
-        maxToRenderPerBatch={2}
-        removeClippedSubviews={true}
-      />
+        <View className="flex-row" style={{ gap: 16 }}>
+            <FocusablePressable
+              className="bg-white px-10 py-5 rounded-2xl flex-row items-center"
+              focusedClassName="bg-red-600 scale-110 shadow-2xl shadow-red-600/30"
+                onPress={() => {
+                  playVideo(focusedVideo, { type: 'music' });
+                }}
+            >
+              {({ isFocused }) => (
+                  <>
+                    <Play size={28} color={isFocused ? 'white' : 'black'} fill={isFocused ? 'white' : 'black'} />
+                    <Text className={`font-black text-2xl ml-3 ${isFocused ? 'text-white' : 'text-black'}`}>Listen Now</Text>
+                  </>
+              )}
+            </FocusablePressable>
+            <FocusablePressable
+              className="bg-white/10 px-10 py-5 rounded-2xl flex-row items-center"
+              focusedClassName="bg-white/20 scale-110"
+            >
+              <Shuffle size={28} color="white" />
+              <Text className="text-white font-black text-2xl ml-3">Mix</Text>
+            </FocusablePressable>
+        </View>
+      </Animated.View>
     </View>
   );
-}
+}, (prev, next) => prev.focusedVideo?.id === next.focusedVideo?.id && prev.isCompact === next.isCompact);
 
 const MusicCard = memo(({ video, isSquare, size, onFocus, onPress }: any) => {
   const aspectRatio = isSquare ? 1 : 16/9;
-  
+
   return (
     <FocusablePressable
       onFocus={onFocus}
@@ -389,13 +177,13 @@ const MusicCard = memo(({ video, isSquare, size, onFocus, onPress }: any) => {
       {({ isFocused }) => (
         <View>
           <View style={{ width: size, aspectRatio, borderRadius: 32, overflow: 'hidden', backgroundColor: '#111' }}>
-            <Image 
+            <Image
               source={{ uri: video.thumbnail || `https://img.youtube.com/vi/${video.id}/hqdefault.jpg` }}
-              style={StyleSheet.absoluteFill} 
+              style={StyleSheet.absoluteFill}
               resizeMode="cover"
             />
             <LinearGradient colors={['transparent', 'rgba(0,0,0,0.5)']} style={StyleSheet.absoluteFill} />
-            
+
             {isFocused && (
               <LinearGradient
                 colors={['rgba(255, 0, 0, 0.3)', 'transparent']}
@@ -434,4 +222,272 @@ const MusicCard = memo(({ video, isSquare, size, onFocus, onPress }: any) => {
       )}
     </FocusablePressable>
   );
-});
+}, (prev, next) => (
+  prev.video?.id === next.video?.id &&
+  prev.video?.thumbnail === next.video?.thumbnail &&
+  prev.video?.title === next.video?.title &&
+  prev.video?.channel === next.video?.channel &&
+  prev.isSquare === next.isSquare &&
+  prev.size === next.size
+));
+
+const MemoizedMusicRail = memo(({ title, videos, isCompact, onFocusCard }: { title: string, videos: Video[], isCompact: boolean, onFocusCard: (v: Video) => void }) => {
+  const isSquare = title === "Your Favorites" || title === "Relaxing Vibes";
+  const cardSize = isSquare ? (isCompact ? 220 : 300) : (isCompact ? 320 : 420);
+
+  if (!videos || videos.length === 0) return null;
+
+  return (
+    <View className="mb-14">
+      <View style={{ paddingHorizontal: isCompact ? 16 : 48, marginBottom: 16 }}>
+        <Text className="text-white text-3xl font-black tracking-tight">{title}</Text>
+      </View>
+      <FlatList
+        horizontal
+        data={videos}
+        keyExtractor={(v, i) => `${v.id}-${i}`}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: isCompact ? 16 : 48, gap: 20 }}
+        initialNumToRender={4}
+        windowSize={5}
+        maxToRenderPerBatch={4}
+        removeClippedSubviews={false} // Prevent TV focus loss on horizontal rails
+        renderItem={({ item }) => (
+          <MusicCard
+            video={item}
+            isSquare={isSquare}
+            size={cardSize}
+            onFocus={() => onFocusCard(item)}
+            onPress={() => {
+              // On phones/tablets, there is no "focus" concept, so tapping a card should start the preview.
+              // The hero "Listen Now" button is the explicit navigation to the full player.
+              if (isCompact) {
+                onFocusCard(item);
+                return;
+              }
+
+              playVideo(item, { type: 'music' });
+            }}
+          />
+        )}
+      />
+    </View>
+  );
+}, (prev, next) => prev.title === next.title && prev.videos === next.videos && prev.isCompact === next.isCompact);
+
+
+// ── Main Screen ──
+
+export default function MusicScreen() {
+  const { width: screenWidth } = useWindowDimensions();
+  const isCompact = screenWidth < 768;
+
+  const [musicData, setMusicData] = useState<Record<string, Video[]>>({});
+  const [loading, setLoading] = useState(true);
+  const [focusedVideo, setFocusedVideo] = useState<Video | null>(null);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastFocusedIdRef = useRef<string | null>(null);
+  const previewingIdRef = useRef<string | null>(null);
+  const isFocusedRef = useRef(false);
+  const [gcCycle, setGcCycle] = useState(0);
+
+  const globalStreamUrl = useAppStore((state) => state.globalStreamUrl);
+  const setGlobalPlayback = useAppStore((state) => state.setGlobalPlayback);
+  const setAmbientState = useAppStore((state) => state.setAmbientState);
+
+  const bgOpacity = useSharedValue(0);
+  const videoOpacity = useSharedValue(0);
+
+  // ── Screen Garbage Collector ──
+  useScreenGC('Music', {
+    delayMs: 25_000,
+    onCleanup: useCallback(() => {
+      setMusicData({});
+      setFocusedVideo(null);
+      setIsPreviewPlaying(false);
+      setLoading(true);
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+      console.log('[Music] 🧹 GC: Released music data & preview');
+    }, []),
+    onReactivate: useCallback(() => {
+      setGcCycle(c => c + 1);
+      console.log('[Music] ♻️ GC: Re-fetching data');
+    }, []),
+  });
+
+  const isFocused = useIsFocused();
+  const { player } = useGlobalPlayer();
+
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
+
+  // Update player settings for preview if focused
+  useEffect(() => {
+    if (isFocused && isPreviewPlaying) {
+      player.volume = 0.2;
+      player.loop = true;
+    } else if (!isFocused) {
+      // Restore full volume when leaving music tab if something is still playing
+      player.volume = 1.0;
+      player.loop = false;
+    }
+  }, [isFocused, isPreviewPlaying, player]);
+
+  // Stop preview when leaving
+  useEffect(() => {
+    if (!isFocused) {
+      setIsPreviewPlaying(false);
+      previewingIdRef.current = null;
+      videoOpacity.value = withTiming(0, { duration: 200 });
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    }
+  }, [isFocused]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchData() {
+      try {
+        const [home, trending, relax, workout] = await Promise.all([
+          youtubeService.getVideosByCategory('Official Music Videos'),
+          youtubeService.getVideosByCategory('Trending music'),
+          youtubeService.getVideosByCategory('Lofi hip hop relax'),
+          youtubeService.getVideosByCategory('High energy workout music'),
+        ]);
+
+        if (cancelled) return;
+
+        const data: Record<string, Video[]> = {
+          "Your Favorites": home,
+          "Trending Now": trending,
+          "Relaxing Vibes": relax,
+          "Energy Boost": workout,
+        };
+
+        setMusicData(data);
+        if (home.length > 0) setFocusedVideo(home[0]);
+        setLoading(false);
+      } catch (error) {
+        console.error('[MusicScreen] Fetch error:', error);
+        if (!cancelled) setLoading(false);
+      }
+    }
+    fetchData();
+    return () => {
+      cancelled = true;
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    };
+  }, [gcCycle]);
+
+  const handleCardFocus = useCallback((video: Video) => {
+    if (!video?.id) return;
+
+    const isNewFocus = lastFocusedIdRef.current !== video.id;
+    lastFocusedIdRef.current = video.id;
+
+    if (isNewFocus) {
+      setFocusedVideo((current) => current?.id === video.id ? current : video);
+      setAmbientState(video.thumbnail, '#FF0055');
+      bgOpacity.value = withTiming(1, { duration: 500, easing: Easing.out(Easing.ease) });
+      videoOpacity.value = withTiming(0, { duration: 180 });
+      setIsPreviewPlaying(false);
+      previewingIdRef.current = null;
+    } else if (previewingIdRef.current === video.id) {
+      return;
+    }
+
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+
+    const requestedVideoId = video.id;
+    previewTimerRef.current = setTimeout(async () => {
+      if (!isFocusedRef.current || lastFocusedIdRef.current !== requestedVideoId) return;
+
+      try {
+        const { globalVideo, globalStreamUrl: currentStreamUrl } = useAppStore.getState();
+        if (globalVideo?.id === requestedVideoId && currentStreamUrl) {
+          previewingIdRef.current = requestedVideoId;
+          setIsPreviewPlaying(true);
+          videoOpacity.value = withTiming(1, { duration: 700, easing: Easing.out(Easing.ease) });
+          return;
+        }
+
+        const stream = await youtubeService.getStream(video.id);
+        if (stream && lastFocusedIdRef.current === video.id && isFocusedRef.current) {
+          setGlobalPlayback(video, stream.url);
+          previewingIdRef.current = video.id;
+          setIsPreviewPlaying(true);
+          videoOpacity.value = withTiming(1, { duration: 700, easing: Easing.out(Easing.ease) });
+        }
+      } catch {}
+    }, PREVIEW_DELAY);
+  }, [setAmbientState, setGlobalPlayback, bgOpacity, videoOpacity]);
+
+  const bgAnimStyle = useAnimatedStyle(() => ({ opacity: bgOpacity.value }));
+  const videoAnimStyle = useAnimatedStyle(() => ({ opacity: videoOpacity.value }));
+
+  const renderHeader = useCallback(() => (
+    <View>
+      <MemoizedMusicHero focusedVideo={focusedVideo} isCompact={isCompact} />
+      <MemoizedCategoryRail isCompact={isCompact} />
+    </View>
+  ), [focusedVideo, isCompact]);
+
+  const renderRail = useCallback(({ item: [title, videos] }: { item: [string, Video[]], index: number }) => {
+    return (
+      <MemoizedMusicRail
+        title={title}
+        videos={videos}
+        isCompact={isCompact}
+        onFocusCard={handleCardFocus}
+      />
+    );
+  }, [handleCardFocus, isCompact]);
+
+  // Pre-calculate data array for FlatList to avoid inline object extraction
+  const flatListData = useMemo(() => Object.entries(musicData), [musicData]);
+
+  if (loading && Object.keys(musicData).length === 0) {
+    return <SingularityLoader />;
+  }
+
+  return (
+    <View className="flex-1 bg-[#050505]">
+      {/* ── AMBIENT LAYERS ── */}
+      <MusicVisualizerBg />
+
+      {focusedVideo && (
+        <Animated.View style={[StyleSheet.absoluteFill, bgAnimStyle]}>
+          <Image
+            source={{ uri: focusedVideo.thumbnail || `https://img.youtube.com/vi/${focusedVideo.id}/maxresdefault.jpg` }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
+          <LinearGradient colors={['transparent', 'rgba(5,5,5,0.6)', '#050505']} style={StyleSheet.absoluteFill} />
+        </Animated.View>
+      )}
+
+      {isFocused && isPreviewPlaying && globalStreamUrl && (
+        <Animated.View style={[StyleSheet.absoluteFill, videoAnimStyle]}>
+          <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
+          <LinearGradient colors={['rgba(5,5,5,0.3)', 'rgba(5,5,5,0.7)', '#050505']} style={StyleSheet.absoluteFill} />
+        </Animated.View>
+      )}
+
+      {/* ── CONTENT ── */}
+      <FlatList
+        data={flatListData}
+        keyExtractor={(item) => item[0]}
+        renderItem={renderRail}
+        ListHeaderComponent={renderHeader}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 100 }}
+        initialNumToRender={2}
+        windowSize={3} // Reduced for TV
+        maxToRenderPerBatch={2}
+        updateCellsBatchingPeriod={150} // Added for TV
+        removeClippedSubviews={false}
+      />
+    </View>
+  );
+}

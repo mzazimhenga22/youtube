@@ -1,5 +1,6 @@
 import React, { memo, useState, useRef } from 'react';
-import { View, Text, DimensionValue, StyleSheet, Image } from 'react-native';
+import { View, Text, DimensionValue, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { FocusablePressable } from './FocusablePressable';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -26,6 +27,7 @@ interface VideoCardProps {
   onPress?: () => void;
   onFocus?: () => void;
   width?: DimensionValue;
+  hasTVPreferredFocus?: boolean;
 }
 
 const VideoPreview = memo(({ url, aspectRatio }: { url: string, aspectRatio: number }) => {
@@ -57,7 +59,8 @@ export const VideoCard = memo(function VideoCard({
   aspectRatio = 16/9,
   onPress,
   onFocus,
-  width
+  width,
+  hasTVPreferredFocus
 }: VideoCardProps) {
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -102,35 +105,43 @@ export const VideoCard = memo(function VideoCard({
         width ? { width } : {}
       ]}
       activeScale={1.06}
+      hasTVPreferredFocus={hasTVPreferredFocus}
     >
       {({ isFocused }) => (
         <View style={{ width: '100%' }}>
-          {/* Clean white ring on focus — no glow */}
+          {/* Main Container with Focus Ring and Glow */}
           <View 
             style={{ 
               backgroundColor: '#1a1a1a', 
               borderRadius: 24, 
               overflow: 'hidden', 
-              borderWidth: 3,
-              borderColor: isFocused ? (isPoster ? '#FF0000' : '#FFFFFF') : 'transparent',
+              borderWidth: 4,
+              borderColor: isFocused ? (isPoster ? '#FF4B4B' : '#FFFFFF') : 'transparent',
               aspectRatio,
               width: '100%',
+              // Focus Glow (Shadow)
+              shadowColor: isFocused ? '#FFFFFF' : 'transparent',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: isFocused ? 0.35 : 0,
+              shadowRadius: 28,
+              elevation: isFocused ? 20 : 0,
             }}
           >
             {/* Main Thumbnail */}
             <Image 
-              key={thumbnail || id}
               source={{ uri: thumbnail || getHQThumbnail(id) }}
               style={StyleSheet.absoluteFill}
-              resizeMode="cover"
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={200}
               onError={(e) => {
-                console.warn(`[VideoCard] Image failed to load for video ${id}:`, e.nativeEvent.error);
+                console.warn(`[VideoCard] Image failed to load for video ${id}`);
               }}
             />
 
             {/* Subtle Gradient Overlay */}
             <LinearGradient
-              colors={['transparent', 'rgba(0,0,0,0.6)']}
+              colors={['transparent', 'rgba(0,0,0,0.7)']}
               style={StyleSheet.absoluteFill}
               pointerEvents="none"
             />
@@ -143,29 +154,35 @@ export const VideoCard = memo(function VideoCard({
             {/* Poster Info Overlay (Only for Posters) */}
             {isPoster && !isFocused && (
                 <View className="absolute inset-0 p-4 justify-end">
-                    <View className="bg-red-600/90 self-start px-2 py-0.5 rounded-lg mb-2">
-                        <Text className="text-white text-[10px] font-black uppercase">Movie</Text>
+                    <View className="bg-red-600/90 self-start px-3 py-1 rounded-lg mb-2 shadow-lg">
+                        <Text className="text-white text-[12px] font-black uppercase tracking-wider">Movie</Text>
                     </View>
                 </View>
             )}
 
             {/* Time Badge (Bottom-Right) */}
             {!isLive && !isPoster && (
-              <View className="absolute bottom-3 right-3 bg-black/80 px-2 py-1 rounded-xl backdrop-blur-md">
-                <Text className="text-white text-[14px] font-black">{duration}</Text>
+              <View 
+                className="absolute bottom-3 right-3 bg-black/85 px-2.5 py-1.5 rounded-xl border border-white/10"
+                style={{ shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 4 }}
+              >
+                <Text className="text-white text-[15px] font-black tracking-tight">{duration}</Text>
               </View>
             )}
 
             {/* Live Badge */}
             {isLive && (
-              <View className="absolute top-3 left-3 bg-red-600 px-3 py-1 rounded-xl shadow-lg shadow-red-600/50">
-                <Text className="text-white text-[12px] font-black uppercase tracking-widest">Live</Text>
+              <View className="absolute top-4 left-4 bg-red-600 px-4 py-1.5 rounded-xl shadow-2xl shadow-red-600/60 border border-white/20">
+                <View className="flex-row items-center">
+                  <View className="w-2 h-2 bg-white rounded-full mr-2 animate-pulse" />
+                  <Text className="text-white text-[14px] font-black uppercase tracking-widest">Live</Text>
+                </View>
               </View>
             )}
 
             {/* Progress Bar */}
             {progress !== undefined && (
-              <View className="absolute bottom-0 left-0 right-0 h-1.5 bg-white/20">
+              <View className="absolute bottom-0 left-0 right-0 h-2 bg-white/20">
                 <View className="h-full bg-red-600" style={{ width: `${progress * 100}%` }} />
               </View>
             )}
